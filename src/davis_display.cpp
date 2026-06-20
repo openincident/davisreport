@@ -21,6 +21,11 @@
 #include "davis_display.h"
 #include "config.h"
 
+// If an older config.h doesn't define this, assume the screen is wanted.
+#ifndef ENABLE_OLED
+#define ENABLE_OLED 1
+#endif
+
 // Remembers whether we actually found a screen. If we didn't (some board
 // variants wire it differently or omit it), every draw call simply does
 // nothing, so a missing screen can never stall the rest of the program.
@@ -54,6 +59,15 @@ static const char *bearingToLabel(uint16_t degrees) {
 // displayBegin(): wake up the screen.
 // ---------------------------------------------------------------------------
 void displayBegin() {
+  // If the screen is switched off in config.h, don't touch the I2C bus at all —
+  // just run headless. (This is the safe escape hatch for boards whose screen
+  // stalls the bus at startup.)
+  if (!ENABLE_OLED) {
+    Serial.println(F("[display] OLED disabled in config.h; running headless."));
+    displayPresent = false;
+    return;
+  }
+
   // IMPORTANT: before handing control to the screen library, we make sure a
   // screen is actually there. On some board variants the OLED is wired to
   // different pins or isn't present at all. If we just started talking to a

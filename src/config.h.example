@@ -58,6 +58,19 @@
 #define USE_IMPERIAL_UNITS  1
 
 // ---------------------------------------------------------------------------
+// 4b. Use the onboard OLED screen?
+// ---------------------------------------------------------------------------
+// Set to 1 to show readings on the board's little screen, or 0 to run without
+// it ("headless"). Everything still works headless — readings just go to Home
+// Assistant and the serial log instead of the screen.
+//
+// SET THIS TO 0 IF: the board reboots over and over and the last line you see
+// is "[setup] 2/4 starting display". That means the screen isn't responding on
+// the expected pins, and trying to talk to it stalls the whole board. Running
+// headless avoids that entirely.
+#define ENABLE_OLED  1
+
+// ---------------------------------------------------------------------------
 // 5. Which LoRa radio chip is on your board?
 // ---------------------------------------------------------------------------
 // The LilyGO T3 v1.6.1 comes with one of two radio chips. They look similar but
