@@ -45,14 +45,23 @@ void setup() {
   Serial.println();
   Serial.println(F("=== davisreport: Davis weather receiver starting ==="));
 
+  // These "[setup] ..." markers (each followed by Serial.flush(), which waits
+  // for the text to actually be sent) let us see exactly how far startup gets
+  // if the board ever hangs or reboots. Whatever marker prints LAST is the step
+  // that's failing. They're cheap to leave in.
+  Serial.println(F("[setup] 1/4 init data")); Serial.flush();
+
   // Start with a clean, empty set of readings.
   davisInit(&weather);
 
   // Turn on the little screen and show a "starting up" message.
+  Serial.println(F("[setup] 2/4 starting display")); Serial.flush();
   displayBegin();
+  Serial.println(F("[setup] 2/4 display OK")); Serial.flush();
 
   // Start the radio. If this fails, it's almost always a pin/wiring problem,
   // so we stop here and keep showing the error rather than pretending to work.
+  Serial.println(F("[setup] 3/4 starting radio")); Serial.flush();
   if (!radioBegin()) {
     Serial.println(F("FATAL: radio failed to start. Check the pin numbers in config.h."));
     // Halt in a gentle loop, leaving the failure visible on serial.
@@ -62,6 +71,7 @@ void setup() {
   }
 
   // Start joining WiFi and preparing the MQTT (Home Assistant) connection.
+  Serial.println(F("[setup] 4/4 starting wifi/mqtt")); Serial.flush();
   mqttBegin();
 
   Serial.println(F("Startup complete. Listening for the Davis station..."));
