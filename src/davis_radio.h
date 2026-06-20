@@ -46,4 +46,10 @@ bool radioIsLocked();
 // not the station — see docs/05-troubleshooting.md.
 uint32_t radioBadCount();
 
+// Returns the strongest live signal strength (dBm) seen since the last call,
+// then resets. Diagnostic: if this ever spikes well above the noise floor
+// (~ -110 dBm), a real signal is reaching the antenna even if we can't decode
+// it. If it never rises, the antenna is effectively hearing nothing.
+float radioGetRssiPeak();
+
 #endif // DAVIS_RADIO_H

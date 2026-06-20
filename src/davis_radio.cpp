@@ -137,6 +137,7 @@ static uint32_t nextExpectedMs = 0;      // when we expect the next message to a
 static uint8_t  consecutiveMisses = 0;   // how many we've missed in a row
 static float    lastRssi = -999.0f;      // signal strength of the last thing we received
 static uint32_t badPacketCount = 0;      // receptions that FAILED the Davis checksum (usually noise)
+static float    rssiPeak = -999.0f;      // strongest live signal seen since the last status print
 
 // ---------------------------------------------------------------------------
 // Small helper: tune the radio to a given position in the hop pattern and
@@ -233,6 +234,16 @@ bool radioBegin() {
 bool radioPoll(uint8_t *packetOut) {
   uint32_t now = millis();
 
+  // Continuously sample the LIVE signal strength (not just when something trips
+  // the sync word). We remember the strongest reading since the last status
+  // print. This is a diagnostic: if a real Davis burst ever reaches the
+  // antenna, this peak will jump far above the noise floor even if we don't
+  // manage to decode it — which tells us "signal is present" vs. "antenna is
+  // hearing nothing." The arguments mean: read the current RSSI, and don't
+  // disturb the radio's receive mode while doing it.
+  float curRssi = radio.getRSSI(false, true);
+  if (curRssi > rssiPeak) rssiPeak = curRssi;
+
   // === CASE 1: the radio received SOMETHING. =============================
   if (packetWaitingFlag) {
     packetWaitingFlag = false;     // clear the flag for next time
@@ -316,3 +327,11 @@ bool radioPoll(uint8_t *packetOut) {
 float    radioGetRssi()  { return lastRssi; }
 bool     radioIsLocked() { return state == STATE_TRACKING; }
 uint32_t radioBadCount() { return badPacketCount; }
+
+// Returns the strongest live signal seen since the last call, then resets the
+// peak. (So each status line shows the peak during that 5-second window.)
+float radioGetRssiPeak() {
+  float p = rssiPeak;
+  rssiPeak = -999.0f;
+  return p;
+}
