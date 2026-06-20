@@ -203,3 +203,29 @@ void davisDecode(const uint8_t *packet, DavisData *data) {
       break;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Dew point — calculated from temperature and humidity.
+// ---------------------------------------------------------------------------
+// This uses the well-known "Magnus formula." You don't need to follow the math;
+// it's a standard, accurate approximation used by weather software everywhere.
+// The constants a and b are the published Magnus coefficients for water vapor.
+float davisDewPointF(float tempF, float humidityPct) {
+  // Before the station has reported humidity it reads 0, which would break the
+  // math (you can't take the log of 0). Clamp it to a sane range first.
+  if (humidityPct < 1.0f)   humidityPct = 1.0f;
+  if (humidityPct > 100.0f) humidityPct = 100.0f;
+
+  // The formula works in Celsius, so convert the temperature in.
+  float tC = (tempF - 32.0f) * 5.0f / 9.0f;
+
+  const float a = 17.625f;
+  const float b = 243.04f;   // degrees Celsius
+
+  // gamma is an intermediate term combining temperature and humidity.
+  float gamma = logf(humidityPct / 100.0f) + (a * tC) / (b + tC);
+
+  // Solve for the dew point in Celsius, then convert back to Fahrenheit.
+  float dewC = (b * gamma) / (a - gamma);
+  return dewC * 9.0f / 5.0f + 32.0f;
+}

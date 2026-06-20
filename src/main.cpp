@@ -135,13 +135,15 @@ void loop() {
   if (now - lastStatusMs >= 5000) {
     lastStatusMs = now;
     Serial.printf(
-      "[status] lock=%s rssi=%ddBm peak=%ddBm good=%lu bad=%lu | %.1fF %.0f%%RH wind=%.0fmph dir=%u gust=%.0f rain=%.2fin | wifi=%s mqtt=%s alert=%s\n",
+      "[status] lock=%s rssi=%ddBm peak=%ddBm good=%lu bad=%lu | %.1fF %.0f%%RH dp=%.0fF wind=%.0fmph dir=%u gust=%.0f rain=%.2fin | wifi=%s mqtt=%s alert=%s\n",
       radioIsLocked() ? "YES" : "no",
       (int)radioGetRssi(),
       (int)radioGetRssiPeak(),
       (unsigned long)weather.goodPacketCount,
       (unsigned long)radioBadCount(),
-      weather.tempF, weather.humidityPct, weather.windSpeedMph,
+      weather.tempF, weather.humidityPct,
+      davisDewPointF(weather.tempF, weather.humidityPct),
+      weather.windSpeedMph,
       weather.windDirDegrees, weather.windGustMph,
       weather.rainClicksTotal * 0.01f,
       wifiIsConnected() ? "Y" : "n",

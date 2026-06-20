@@ -130,6 +130,7 @@ static void sendAllDiscovery() {
 
   // --- The main weather readings ---
   sendDiscovery("sensor", "temperature", "Temperature", "temperature", tempUnit, "temp", "measurement", false);
+  sendDiscovery("sensor", "dew_point",   "Dew Point",   "temperature", tempUnit, "dew_point", "measurement", false);
   sendDiscovery("sensor", "humidity",    "Humidity",    "humidity",    "%",      "humidity", "measurement", false);
   sendDiscovery("sensor", "wind_speed",  "Wind Speed",  "wind_speed",  windUnit, "wind_speed", "measurement", false);
   sendDiscovery("sensor", "wind_gust",   "Wind Gust",   "wind_speed",  windUnit, "wind_gust", "measurement", false);
@@ -234,15 +235,20 @@ void mqttPublish(const DavisData *data, float rssi, bool radioLocked) {
   // Build the JSON that every Home Assistant sensor reads from.
   JsonDocument doc;
 
+  // Dew point is calculated from temperature + humidity (in °F internally).
+  float dewF = davisDewPointF(data->tempF, data->humidityPct);
+
   // Convert each value into your chosen units as we add it.
   if (USE_IMPERIAL_UNITS) {
     doc["temp"]       = roundf(data->tempF * 10) / 10.0f;          // °F
+    doc["dew_point"]  = roundf(dewF * 10) / 10.0f;                  // °F
     doc["wind_speed"] = (int)data->windSpeedMph;                    // mph
     doc["wind_gust"]  = (int)data->windGustMph;                     // mph
     doc["rain_rate"]  = roundf(data->rainRateInHr * 100) / 100.0f;  // in/h
     doc["rain_total"] = roundf(data->rainClicksTotal * 0.01f * 100) / 100.0f; // in
   } else {
     doc["temp"]       = roundf((data->tempF - 32) * 5 / 9 * 10) / 10.0f;       // °C
+    doc["dew_point"]  = roundf((dewF - 32) * 5 / 9 * 10) / 10.0f;              // °C
     doc["wind_speed"] = roundf(data->windSpeedMph * 1.60934f);                 // km/h
     doc["wind_gust"]  = roundf(data->windGustMph * 1.60934f);                  // km/h
     doc["rain_rate"]  = roundf(data->rainRateInHr * 25.4f * 10) / 10.0f;       // mm/h

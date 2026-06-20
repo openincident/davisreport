@@ -80,4 +80,11 @@ bool davisCrcValid(const uint8_t *packet);
 // Call davisCrcValid() FIRST and only call this if it returned true.
 void davisDecode(const uint8_t *packet, DavisData *data);
 
+// Works out the DEW POINT (in °F) from a temperature (°F) and relative humidity
+// (%). The dew point is the temperature the air would have to cool to before
+// its moisture starts condensing — a more intuitive "how muggy is it" number
+// than humidity alone. It's a calculation, not a sensor reading, so we derive
+// it from the temperature and humidity the station already reports.
+float davisDewPointF(float tempF, float humidityPct);
+
 #endif // DAVIS_PROTOCOL_H

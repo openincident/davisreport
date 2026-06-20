@@ -151,7 +151,7 @@ void displayShow(const DavisData *data, bool radioOk, float rssi,
   // A thin line under the title to separate it from the readings.
   oled.drawHLine(0, 14, 128);
 
-  // --- Temperature (big-ish) and humidity ---
+  // --- Temperature (big, on the left) ---
   if (USE_IMPERIAL_UNITS) {
     snprintf(line, sizeof(line), "%.1f F", data->tempF);
   } else {
@@ -161,9 +161,18 @@ void displayShow(const DavisData *data, bool radioOk, float rssi,
   oled.setFont(u8g2_font_9x15_tr);
   oled.drawStr(0, 32, line);
 
-  // Humidity on the right side of the same row.
-  snprintf(line, sizeof(line), "%.0f%%", data->humidityPct);
-  oled.drawStr(86, 32, line);
+  // --- Right column (smaller): humidity on top, dew point below it ---
+  oled.setFont(u8g2_font_6x12_tr);
+  snprintf(line, sizeof(line), "RH %.0f%%", data->humidityPct);
+  oled.drawStr(80, 26, line);
+
+  float dewF = davisDewPointF(data->tempF, data->humidityPct);
+  if (USE_IMPERIAL_UNITS) {
+    snprintf(line, sizeof(line), "DP %.0fF", dewF);
+  } else {
+    snprintf(line, sizeof(line), "DP %.0fC", (dewF - 32.0f) * 5.0f / 9.0f);
+  }
+  oled.drawStr(80, 38, line);
 
   // --- Wind speed and direction ---
   oled.setFont(u8g2_font_6x12_tr);
