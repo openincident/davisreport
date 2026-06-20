@@ -113,23 +113,40 @@ void displayBegin() {
 // displayShow(): redraw everything with the latest values.
 // ---------------------------------------------------------------------------
 void displayShow(const DavisData *data, bool radioOk, float rssi,
-                 bool wifiOk, bool mqttOk) {
+                 bool wifiOk, bool mqttOk, bool alarm, const char *alarmReason) {
   // If there's no screen, there's nothing to draw — just return quietly.
   if (!displayPresent) return;
 
   // A reusable little text buffer for formatting numbers into strings.
   char line[28];
 
+  // This flips every time we're called (~twice a second). We use it to make the
+  // alert banner BLINK: on one frame we show the bright alert bar, on the next
+  // we show the normal title, which reads as a flashing warning.
+  static bool blinkPhase = false;
+  blinkPhase = !blinkPhase;
+
   oled.clearBuffer();   // start from a blank screen each time
 
-  // --- Title row ---
   oled.setFont(u8g2_font_6x12_tr);
-  oled.drawStr(0, 11, "Davis Weather");
 
-  // Connection icons on the top-right: "W" for WiFi, "M" for MQTT. We draw them
-  // only when connected, so a missing letter instantly shows what's down.
-  if (wifiOk) oled.drawStr(104, 11, "W");
-  if (mqttOk) oled.drawStr(116, 11, "M");
+  // --- Title row, OR a flashing alert banner ---
+  if (alarm && blinkPhase) {
+    // Alert + "on" half of the blink: draw a solid white bar across the top and
+    // print the reason in black on top of it (inverse text) — impossible to miss.
+    oled.drawBox(0, 0, 128, 14);
+    oled.setDrawColor(0);                       // draw in "black" (un-lit pixels)
+    snprintf(line, sizeof(line), "! %s !", alarmReason);
+    oled.drawStr(2, 11, line);
+    oled.setDrawColor(1);                       // back to normal "white" drawing
+  } else {
+    // Normal title (also shown on the "off" half of the blink, so it flashes).
+    oled.drawStr(0, 11, "Davis Weather");
+    // Connection icons on the top-right: "W" for WiFi, "M" for MQTT. We draw
+    // them only when connected, so a missing letter instantly shows what's down.
+    if (wifiOk) oled.drawStr(104, 11, "W");
+    if (mqttOk) oled.drawStr(116, 11, "M");
+  }
 
   // A thin line under the title to separate it from the readings.
   oled.drawHLine(0, 14, 128);

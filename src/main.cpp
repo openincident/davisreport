@@ -22,6 +22,7 @@
 #include "davis_radio.h"
 #include "davis_display.h"
 #include "davis_mqtt.h"
+#include "davis_alarm.h"
 
 // Our single, shared record of the latest weather readings. Every part of the
 // program reads from or writes to this one structure.
@@ -56,6 +57,13 @@ void setup() {
 
   // Start with a clean, empty set of readings.
   davisInit(&weather);
+
+  // Get the alert logic ready, and set up the alert LED pin (off to start).
+  alarmInit();
+  if (ALARM_LED_ENABLE) {
+    pinMode(PIN_ALERT_LED, OUTPUT);
+    digitalWrite(PIN_ALERT_LED, LOW);
+  }
 
   // Turn on the little screen and show a "starting up" message.
   Serial.println(F("[setup] 2/4 starting display")); Serial.flush();
@@ -97,19 +105,29 @@ void loop() {
     mqttPublish(&weather, radioGetRssi(), radioIsLocked());  // send to Home Assistant
   }
 
-  // 3. Refresh the on-screen display about twice a second. We also use this
-  //    moment to trigger the periodic "keep-alive" publish to Home Assistant.
   uint32_t now = millis();
+
+  // 3. Re-check the severe-weather thresholds (this also keeps the rolling
+  //    30-minute rain total current), and blink the alert LED if we're alarmed.
+  alarmUpdate(&weather);
+  if (ALARM_LED_ENABLE) {
+    // When alarmed, flash the LED about 3 times a second; otherwise keep it off.
+    digitalWrite(PIN_ALERT_LED, alarmActive() ? ((now / 150) % 2) : LOW);
+  }
+
+  // 4. Refresh the on-screen display about twice a second. We also use this
+  //    moment to trigger the periodic "keep-alive" publish to Home Assistant.
   if (now - lastDisplayMs >= 500) {
     lastDisplayMs = now;
     displayShow(&weather, radioIsLocked(), radioGetRssi(),
-                wifiIsConnected(), mqttIsConnected());
+                wifiIsConnected(), mqttIsConnected(),
+                alarmActive(), alarmReason());
     // Re-send readings periodically even with no new packet, so Home Assistant
     // never marks the sensors stale. (mqttPublish decides if it's time.)
     mqttPublish(&weather, radioGetRssi(), radioIsLocked());
   }
 
-  // 4. Every few seconds, print a one-line status summary to the serial log.
+  // 5. Every few seconds, print a one-line status summary to the serial log.
   //    This is our "dashboard" when running headless: it shows whether we're
   //    locked on, how many good vs. garbled messages we've received (a measure
   //    of reception quality), the signal strength, the current readings, and
@@ -117,7 +135,7 @@ void loop() {
   if (now - lastStatusMs >= 5000) {
     lastStatusMs = now;
     Serial.printf(
-      "[status] lock=%s rssi=%ddBm peak=%ddBm good=%lu bad=%lu | %.1fF %.0f%%RH wind=%.0fmph dir=%u gust=%.0f rain=%.2fin | wifi=%s mqtt=%s\n",
+      "[status] lock=%s rssi=%ddBm peak=%ddBm good=%lu bad=%lu | %.1fF %.0f%%RH wind=%.0fmph dir=%u gust=%.0f rain=%.2fin | wifi=%s mqtt=%s alert=%s\n",
       radioIsLocked() ? "YES" : "no",
       (int)radioGetRssi(),
       (int)radioGetRssiPeak(),
@@ -127,6 +145,7 @@ void loop() {
       weather.windDirDegrees, weather.windGustMph,
       weather.rainClicksTotal * 0.01f,
       wifiIsConnected() ? "Y" : "n",
-      mqttIsConnected() ? "Y" : "n");
+      mqttIsConnected() ? "Y" : "n",
+      alarmActive() ? alarmReason() : "none");
   }
 }

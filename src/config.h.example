@@ -118,7 +118,48 @@
 #define PIN_OLED_RST    16
 
 // ---------------------------------------------------------------------------
-// 6. Optional tuning knobs (safe to leave at defaults)
+// 7. Severe-weather ALERT thresholds (SkyWarn-style)
+// ---------------------------------------------------------------------------
+// When a reading crosses one of these limits, the board raises a visible ALERT:
+// it flashes a banner on the screen and blinks the blue LED, and it turns on a
+// "Weather Alert" switch in Home Assistant that you can build automations on.
+//
+// The defaults below come from the NWS PHOENIX SkyWarn spotter reporting
+// criteria (https://www.weather.gov/psr/skywarn.html). IMPORTANT: these criteria
+// are LOCATION-DEPENDENT — every NWS office sets its own. If you are not in the
+// Phoenix area, look up your local office's spotter page and change these.
+//
+// Set any threshold to 0 to turn that particular check off.
+
+#define ALARM_ENABLE  1     // 1 = turn the alert feature on, 0 = off entirely
+
+// HEAVY RAIN. NWS Phoenix asks spotters to report 0.50 inch or more of rain in
+// 30 minutes or less. The firmware keeps a rolling 30-minute rain total and
+// alerts when it reaches this many inches.
+#define ALARM_RAIN_30MIN_INCHES   0.50
+
+// DAMAGING WIND GUST (mph). The Phoenix page lists no specific wind number, so
+// this 40 mph default is the common SkyWarn "go ahead and report it" level.
+// (A severe thunderstorm warning is issued at 58 mph.) Adjust to taste.
+#define ALARM_WIND_GUST_MPH       40
+
+// HIGH SUSTAINED WIND (mph). Off by default (0). In dust-storm country you might
+// set this around 35-40 to catch the strong steady winds that kick up haboobs.
+#define ALARM_WIND_SUSTAINED_MPH  0
+
+// After an alert trips, keep showing it for at least this many seconds even once
+// the reading falls back below the limit — so a single brief gust still gets
+// noticed instead of flickering away instantly.
+#define ALARM_HOLD_SECONDS        120
+
+// The onboard LED to blink during an alert. On the LilyGO T3 this is usually
+// GPIO25. Set ALARM_LED_ENABLE to 0 if your board has no usable LED there (the
+// on-screen alert still works), or change the pin number to match your board.
+#define ALARM_LED_ENABLE  1
+#define PIN_ALERT_LED     25
+
+// ---------------------------------------------------------------------------
+// 8. Optional tuning knobs (safe to leave at defaults)
 // ---------------------------------------------------------------------------
 // How often (in seconds) to re-send EVERY reading to Home Assistant even if the
 // value hasn't changed. This keeps Home Assistant from marking sensors as

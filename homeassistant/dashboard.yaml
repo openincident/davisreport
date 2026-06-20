@@ -14,6 +14,22 @@
 
 type: vertical-stack
 cards:
+  # --- Severe-weather alert banner ---
+  # This card turns red and shows the reason whenever the board raises an alert
+  # (a reading crossed your SkyWarn thresholds). It's a "conditional" card, so it
+  # only appears while an alert is active.
+  - type: conditional
+    conditions:
+      - entity: binary_sensor.davis_weather_station_weather_alert
+        state: "on"
+    card:
+      type: markdown
+      content: >
+        # ⚠️ WEATHER ALERT —
+        {{ states('sensor.davis_weather_station_alert_reason') }}
+
+        A reading has crossed your SkyWarn reporting threshold.
+
   # --- A row of at-a-glance gauges for the headline numbers ---
   - type: horizontal-stack
     cards:
@@ -44,6 +60,10 @@ cards:
     title: Davis Weather Station
     show_header_toggle: false
     entities:
+      - entity: binary_sensor.davis_weather_station_weather_alert
+        name: Weather Alert
+      - entity: sensor.davis_weather_station_alert_reason
+        name: Alert Reason
       - entity: sensor.davis_weather_station_temperature
         name: Temperature
       - entity: sensor.davis_weather_station_humidity

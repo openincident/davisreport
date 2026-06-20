@@ -25,6 +25,7 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include "davis_mqtt.h"
+#include "davis_alarm.h"
 #include "config.h"
 
 // The network plumbing: a basic network connection wrapped by an MQTT client.
@@ -136,6 +137,13 @@ static void sendAllDiscovery() {
   sendDiscovery("sensor", "rain_rate",   "Rain Rate",   "precipitation_intensity", rateUnit, "rain_rate", "measurement", false);
   sendDiscovery("sensor", "rain_total",  "Rain Total",  "precipitation", rainUnit, "rain_total", "total_increasing", false);
   sendDiscovery("sensor", "solar",       "Solar Radiation", "irradiance", "W/m²", "solar", "measurement", false);
+
+  // --- The severe-weather alert ---
+  // A binary (on/off) sensor with device_class "safety", so Home Assistant
+  // treats "on" as the unsafe/alert state. Build automations on this. The
+  // companion "Alert Reason" text sensor says which threshold tripped.
+  sendDiscovery("binary_sensor", "alert", "Weather Alert", "safety", "", "alert", "", false);
+  sendDiscovery("sensor", "alert_reason", "Alert Reason", "", "", "alert_reason", "", false);
 
   // --- Diagnostics (health/signal info, tucked away in HA) ---
   sendDiscovery("sensor", "supercap",    "Supercap Voltage", "voltage", "V",   "supercap", "measurement", true);
@@ -249,8 +257,12 @@ void mqttPublish(const DavisData *data, float rssi, bool radioLocked) {
   doc["battery_low"] = data->batteryLow ? 1 : 0;
   doc["rssi"]        = (int)rssi;
 
+  // The severe-weather alert: a 1/0 flag plus a short reason for Home Assistant.
+  doc["alert"]        = alarmActive() ? 1 : 0;
+  doc["alert_reason"] = alarmActive() ? alarmReason() : "none";
+
   // Turn it into text and publish (retained, so HA shows last value on restart).
-  char payload[256];
+  char payload[384];
   size_t len = serializeJson(doc, payload, sizeof(payload));
   mqtt.publish(stateTopic, (const uint8_t *)payload, len, true);
 }
