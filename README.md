@@ -2,7 +2,7 @@
 
 **Read a Davis Vantage Pro2 weather station out of the air with a $15 radio board, show the readings on a tiny screen, and send them to Home Assistant.**
 
-This project turns a [LilyGO T3 v1.6.1](https://lilygo.cc/products/lora3) (a small ESP32 board with a built-in radio and a little OLED screen) into a receiver for your Davis weather station. It listens to the radio signal your outdoor sensors already broadcast, decodes the temperature/wind/rain/humidity, displays them on the board's screen, and publishes them to [Home Assistant](https://www.home-assistant.io/) over MQTT.
+This project turns a [LilyGO T3-S3](https://lilygo.cc/products/t3s3-v1-0) (a small ESP32-S3 board with a built-in radio and a little OLED screen) into a receiver for your Davis weather station. It listens to the radio signal your outdoor sensors already broadcast, decodes the temperature/wind/rain/humidity, displays them on the board's screen, and publishes them to [Home Assistant](https://www.home-assistant.io/) over MQTT.
 
 You do **not** need to touch your existing Davis console — this is a completely separate, passive listener that hears the same broadcast the console hears.
 

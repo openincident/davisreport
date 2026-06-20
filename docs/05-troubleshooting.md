@@ -17,10 +17,11 @@ This means the radio isn't catching the station's signal.
 
 ## The radio says "FAILED to start" at boot
 
-The ESP32 can't talk to the radio chip — almost always a pin mismatch.
+The ESP32-S3 can't talk to the radio chip — usually a pin mismatch or the TCXO setting.
 
 - Confirm you copied `config.h.example` to `config.h` and didn't change the pin numbers.
-- If you have a different board revision, check its documentation for the correct SX1276 pins (SCK, MISO, MOSI, CS, RST, DIO0, DIO1) and update the "Hardware pin map" section of `config.h`.
+- If you have a different board revision, check its documentation for the correct SX1262 pins (SCK, MISO, MOSI, CS, RST, BUSY, DIO1) and update the "Hardware pin map" section of `config.h`.
+- **TCXO voltage.** The T3-S3's radio uses a temperature-controlled crystal that the chip powers at a specific voltage. We set `1.8` in the `beginFSK(...)` call in `src/davis_radio.cpp`. If the radio won't start, try changing that value to `3.3`, or to `0` (meaning "no TCXO"). A wrong value here is a common cause of a failed start on these boards.
 
 ## The screen stays blank or shows nothing
 

@@ -24,6 +24,12 @@
 // is re-tuning the radio; and the fixed order is the published Davis hopping
 // pattern. All the numbers below come from the community reverse-engineering
 // work credited in the README.
+//
+// THE RADIO CHIP: this board (LilyGO T3-S3) uses a Semtech SX1262. The SX1262
+// can do plain FSK ("frequency-shift keying" — sending bits by nudging the
+// frequency up or down), which is exactly what Davis uses. The only things that
+// differ from the older SX1276 chip are how we wire it up and a couple of
+// setup calls; the hopping logic and everything else is identical.
 // ===========================================================================
 
 #include <RadioLib.h>
@@ -89,21 +95,26 @@ static const uint8_t MAX_CONSECUTIVE_MISSES = 6;
 // ---------------------------------------------------------------------------
 // THE RADIO OBJECT (provided by the RadioLib library)
 // ---------------------------------------------------------------------------
-// This represents the SX1276 chip. We tell it which pins connect us to it.
-static SX1276 radio = new Module(PIN_LORA_CS, PIN_LORA_DIO0, PIN_LORA_RST, PIN_LORA_DIO1);
+// This represents the SX1262 chip. We tell it which pins connect us to it.
+// The SX1262 needs four control pins: chip-select (CS), an interrupt line
+// (DIO1), a reset line (RST), and a "busy" line the chip uses to say "hold on,
+// I'm working." (The older SX1276 used a "DIO0" pin instead of a busy line —
+// that's the main wiring difference.)
+static SX1262 radio = new Module(PIN_LORA_CS, PIN_LORA_DIO1, PIN_LORA_RST, PIN_LORA_BUSY);
 
 // ---------------------------------------------------------------------------
 // SHARED STATE between the main code and the interrupt handler.
 // ---------------------------------------------------------------------------
 // "Interrupt" = the radio chip can tap the ESP32 on the shoulder the instant a
-// message arrives, by toggling a pin. The tiny function below runs at that
-// moment. It must do as little as possible, so it just sets a flag that the
-// main loop notices later. "volatile" tells the compiler this flag can change
-// at any time (from the interrupt), so don't optimize it away.
+// message arrives, by toggling the DIO1 pin. The tiny function below runs at
+// that moment. It must do as little as possible, so it just sets a flag that
+// the main loop notices later. "volatile" tells the compiler this flag can
+// change at any time (from the interrupt), so don't optimize it away.
 static volatile bool packetWaitingFlag = false;
 
-// This function is the "shoulder tap" handler. Keep it minimal.
-ICACHE_RAM_ATTR static void onPacketArrived() {
+// This function is the "shoulder tap" handler. Keep it minimal. IRAM_ATTR puts
+// it in fast internal memory so it can run even during flash operations.
+IRAM_ATTR static void onPacketArrived() {
   packetWaitingFlag = true;
 }
 
@@ -145,19 +156,22 @@ bool radioBegin() {
   SPI.begin(PIN_LORA_SCK, PIN_LORA_MISO, PIN_LORA_MOSI, PIN_LORA_CS);
 
   // Start the radio in "FSK" mode with the exact settings the Davis station
-  // uses. FSK ("frequency-shift keying") means bits are sent by nudging the
-  // frequency slightly up or down. The arguments, in order, are:
+  // uses. The arguments, in order, are:
   //   - starting frequency (MHz): begin on hop-pattern position 0's frequency
   //   - bit rate: 19.2 kilobits per second
   //   - frequency deviation: 4.8 kHz (how far the frequency nudges per bit)
-  //   - receiver bandwidth: 25 kHz (how wide a slice of spectrum we listen to)
+  //   - receiver bandwidth: 29.3 kHz (how wide a slice of spectrum we listen to)
   //   - transmit power: 10 (we only listen, so this is irrelevant)
   //   - preamble length: 16 (a lead-in pattern; default is fine for receiving)
+  //   - TCXO voltage: 1.8 V — the T3-S3 has a temperature-controlled crystal
+  //     (TCXO) that the SX1262 powers through this setting. If the radio fails
+  //     to start, this is the first value to try changing (some boards use 0,
+  //     meaning "no TCXO", or 3.3).
   float startFreq = CHANNEL_FREQ_MHZ[HOP_PATTERN[0]];
-  int status = radio.beginFSK(startFreq, 19.2f, 4.8f, 25.0f, 10, 16);
+  int status = radio.beginFSK(startFreq, 19.2f, 4.8f, 29.3f, 10, 16, 1.8f, false);
   if (status != RADIOLIB_ERR_NONE) {
-    // A non-zero status means the radio didn't start. Almost always a wiring or
-    // pin-number problem. Report the error code so troubleshooting is easier.
+    // A non-zero status means the radio didn't start. Usually a wiring/pin
+    // problem, or the TCXO voltage above. Report the code for troubleshooting.
     Serial.print(F("[radio] FAILED to start, error code: "));
     Serial.println(status);
     return false;
@@ -172,15 +186,21 @@ bool radioBegin() {
   radio.setSyncWord(syncWord, 2);
 
   // Davis does NOT use the radio chip's built-in checksum; it has its own
-  // (which we check in software). So turn the hardware checksum off.
-  radio.setCRC(false);
+  // (which we check in software). So turn the hardware checksum off (length 0).
+  radio.setCRC(0);
 
   // Every Davis message is exactly 10 bytes, so use fixed-length mode.
   radio.fixedPacketLengthMode(DAVIS_PACKET_LENGTH);
 
-  // "Encoding NRZ" means the bits are sent as-is, with no extra scrambling or
-  // whitening. That matches Davis.
-  radio.setEncoding(RADIOLIB_ENCODING_NRZ);
+  // Davis does not scramble ("whiten") its data, so turn whitening off.
+  radio.setWhitening(false);
+
+  // Davis uses plain FSK with no special pulse shaping on our receive side.
+  radio.setDataShaping(RADIOLIB_SHAPING_NONE);
+
+  // Turn on the SX1262's "boosted" receive gain for a bit more sensitivity —
+  // helpful for catching a weak, distant weather station.
+  radio.setRxBoostedGainMode(true);
 
   // Tell the radio to tap our handler the instant a full message arrives.
   radio.setPacketReceivedAction(onPacketArrived);

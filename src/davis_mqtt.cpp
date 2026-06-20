@@ -101,7 +101,7 @@ static void sendDiscovery(const char *component, const char *objectId,
   ids.add(DEVICE_ID);
   device["name"] = DEVICE_NAME;
   device["manufacturer"] = "Davis Instruments";
-  device["model"] = "Vantage Pro2 (received via LilyGO SX1276)";
+  device["model"] = "Vantage Pro2 (received via LilyGO T3-S3 / SX1262)";
 
   // Turn the JSON into text.
   char payload[640];
