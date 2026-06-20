@@ -25,11 +25,12 @@
 // pattern. All the numbers below come from the community reverse-engineering
 // work credited in the README.
 //
-// THE RADIO CHIP: this board (LilyGO T3-S3) uses a Semtech SX1262. The SX1262
-// can do plain FSK ("frequency-shift keying" — sending bits by nudging the
-// frequency up or down), which is exactly what Davis uses. The only things that
-// differ from the older SX1276 chip are how we wire it up and a couple of
-// setup calls; the hopping logic and everything else is identical.
+// THE RADIO CHIP: this board (LilyGO T3 v1.6.1) carries either a Semtech SX1276
+// or an SX1262 — you choose which in config.h. Both can do plain FSK
+// ("frequency-shift keying" — sending bits by nudging the frequency up or
+// down), which is exactly what Davis uses. The two chips need slightly
+// different setup calls, handled by the small #if blocks below; the hopping
+// logic and everything else is identical for both.
 // ===========================================================================
 
 #include <RadioLib.h>
@@ -95,12 +96,16 @@ static const uint8_t MAX_CONSECUTIVE_MISSES = 6;
 // ---------------------------------------------------------------------------
 // THE RADIO OBJECT (provided by the RadioLib library)
 // ---------------------------------------------------------------------------
-// This represents the SX1262 chip. We tell it which pins connect us to it.
-// The SX1262 needs four control pins: chip-select (CS), an interrupt line
-// (DIO1), a reset line (RST), and a "busy" line the chip uses to say "hold on,
-// I'm working." (The older SX1276 used a "DIO0" pin instead of a busy line —
-// that's the main wiring difference.)
+// This represents the radio chip. We tell it which pins connect us to it.
+// The two chip versions wire one control pin differently, so we build the
+// matching object based on your choice in config.h:
+//   - SX1262 uses a "BUSY" line (the chip's way of saying "hold on, I'm working")
+//   - SX1276 uses a "DIO0" line instead
+#if defined(RADIO_CHIP_SX1262)
 static SX1262 radio = new Module(PIN_LORA_CS, PIN_LORA_DIO1, PIN_LORA_RST, PIN_LORA_BUSY);
+#else
+static SX1276 radio = new Module(PIN_LORA_CS, PIN_LORA_DIO0, PIN_LORA_RST, PIN_LORA_DIO1);
+#endif
 
 // ---------------------------------------------------------------------------
 // SHARED STATE between the main code and the interrupt handler.
@@ -163,12 +168,17 @@ bool radioBegin() {
   //   - receiver bandwidth: 29.3 kHz (how wide a slice of spectrum we listen to)
   //   - transmit power: 10 (we only listen, so this is irrelevant)
   //   - preamble length: 16 (a lead-in pattern; default is fine for receiving)
-  //   - TCXO voltage: 1.8 V — the T3-S3 has a temperature-controlled crystal
-  //     (TCXO) that the SX1262 powers through this setting. If the radio fails
-  //     to start, this is the first value to try changing (some boards use 0,
-  //     meaning "no TCXO", or 3.3).
   float startFreq = CHANNEL_FREQ_MHZ[HOP_PATTERN[0]];
+#if defined(RADIO_CHIP_SX1262)
+  // The SX1262 takes two extra arguments: the TCXO (temperature-controlled
+  // crystal) voltage — 1.8 V here — and the power-regulator choice. If the
+  // radio fails to start, the TCXO voltage is the first thing to try changing
+  // (some boards use 0, meaning "no TCXO", or 3.3). See docs/05-troubleshooting.
   int status = radio.beginFSK(startFreq, 19.2f, 4.8f, 29.3f, 10, 16, 1.8f, false);
+#else
+  // The SX1276 uses the same FSK settings but has no TCXO argument.
+  int status = radio.beginFSK(startFreq, 19.2f, 4.8f, 25.0f, 10, 16);
+#endif
   if (status != RADIOLIB_ERR_NONE) {
     // A non-zero status means the radio didn't start. Usually a wiring/pin
     // problem, or the TCXO voltage above. Report the code for troubleshooting.
@@ -185,22 +195,23 @@ bool radioBegin() {
   uint8_t syncWord[] = { 0xCB, 0x89 };
   radio.setSyncWord(syncWord, 2);
 
-  // Davis does NOT use the radio chip's built-in checksum; it has its own
-  // (which we check in software). So turn the hardware checksum off (length 0).
-  radio.setCRC(0);
-
   // Every Davis message is exactly 10 bytes, so use fixed-length mode.
   radio.fixedPacketLengthMode(DAVIS_PACKET_LENGTH);
-
-  // Davis does not scramble ("whiten") its data, so turn whitening off.
-  radio.setWhitening(false);
 
   // Davis uses plain FSK with no special pulse shaping on our receive side.
   radio.setDataShaping(RADIOLIB_SHAPING_NONE);
 
-  // Turn on the SX1262's "boosted" receive gain for a bit more sensitivity —
-  // helpful for catching a weak, distant weather station.
-  radio.setRxBoostedGainMode(true);
+  // The last few settings are spelled slightly differently on the two chips.
+  // In both cases we're saying: turn OFF the chip's built-in checksum (we do
+  // our own in software) and don't scramble/whiten the data.
+#if defined(RADIO_CHIP_SX1262)
+  radio.setCRC(0);                    // 0 = no hardware checksum
+  radio.setWhitening(false);          // Davis does not whiten its data
+  radio.setRxBoostedGainMode(true);   // extra receive sensitivity (SX1262 feature)
+#else
+  radio.setCRC(false);                // no hardware checksum
+  radio.setEncoding(RADIOLIB_ENCODING_NRZ);  // send bits as-is: no whitening/manchester
+#endif
 
   // Tell the radio to tap our handler the instant a full message arrives.
   radio.setPacketReceivedAction(onPacketArrived);

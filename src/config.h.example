@@ -58,29 +58,47 @@
 #define USE_IMPERIAL_UNITS  1
 
 // ---------------------------------------------------------------------------
-// 5. Hardware pin map — how the radio and screen are wired to the ESP32
+// 5. Which LoRa radio chip is on your board?
 // ---------------------------------------------------------------------------
-// These are the factory wiring connections on the LilyGO T3-S3 (ESP32-S3 with
-// an SX1262 radio). You should NOT need to change these unless you have a
-// different board revision. If the radio never starts up (see the serial
-// monitor), double-check these against your board's documentation — see
-// docs/01-hardware-and-wiring.md.
+// The LilyGO T3 v1.6.1 comes with one of two radio chips. They look similar but
+// need slightly different setup, so you must tell the code which one you have.
+//
+// HOW TO FIND OUT: look at the small metal can (the radio module) on the board.
+// It's printed with the chip name — either "SX1276" or "SX1262".
+//
+// Leave exactly ONE of the two lines below uncommented (no leading "//").
+// If you're not sure, start with SX1276 (the most common). If the radio fails
+// to start when you run it, switch to SX1262 and re-flash.
+#define RADIO_CHIP_SX1276
+// #define RADIO_CHIP_SX1262
 
-// -- SX1262 radio chip (connected over a bus called "SPI") --
+// ---------------------------------------------------------------------------
+// 6. Hardware pin map — how the radio and screen are wired to the ESP32
+// ---------------------------------------------------------------------------
+// These are the factory wiring connections on the LilyGO T3 v1.6.1. You should
+// NOT need to change these unless you have a different board revision. If the
+// radio never starts up (see the serial monitor), double-check these against
+// your board's documentation — see docs/01-hardware-and-wiring.md.
+//
+// Both radio versions (SX1276 and SX1262) use the same SPI wiring; they differ
+// only in one control pin: the SX1276 uses "DIO0" and the SX1262 uses "BUSY".
+// We define both here, and the code uses whichever one matches the radio chip
+// you selected above.
+
+// -- LoRa radio chip (connected over a bus called "SPI") --
 #define PIN_LORA_SCK    5    // SPI clock
-#define PIN_LORA_MISO   3    // SPI data: radio -> ESP32
-#define PIN_LORA_MOSI   6    // SPI data: ESP32 -> radio
-#define PIN_LORA_CS     7    // "chip select" — tells the radio we're talking to it
-#define PIN_LORA_RST    8    // reset line for the radio
-#define PIN_LORA_BUSY   34   // "busy" line: the SX1262 raises this while it's working
-#define PIN_LORA_DIO1   33   // "interrupt" pin: radio raises this when a packet arrives
+#define PIN_LORA_MISO   19   // SPI data: radio -> ESP32
+#define PIN_LORA_MOSI   27   // SPI data: ESP32 -> radio
+#define PIN_LORA_CS     18   // "chip select" — tells the radio we're talking to it
+#define PIN_LORA_RST    23   // reset line for the radio
+#define PIN_LORA_DIO0   26   // SX1276 only: "packet arrived" interrupt pin
+#define PIN_LORA_DIO1   33   // interrupt pin (used by both chips)
+#define PIN_LORA_BUSY   32   // SX1262 only: "busy" line the chip raises while working
 
 // -- SSD1306 OLED screen (connected over a bus called "I2C") --
-#define PIN_OLED_SDA    18   // I2C data line
-#define PIN_OLED_SCL    17   // I2C clock line
-// The T3-S3's screen has no separate reset wire (it resets with the board), so
-// we tell the display library "there is no reset pin" with U8X8_PIN_NONE.
-#define PIN_OLED_RST    U8X8_PIN_NONE
+#define PIN_OLED_SDA    21   // I2C data line
+#define PIN_OLED_SCL    22   // I2C clock line
+#define PIN_OLED_RST    16   // OLED reset (LilyGO ties the screen's reset to GPIO16)
 
 // ---------------------------------------------------------------------------
 // 6. Optional tuning knobs (safe to leave at defaults)

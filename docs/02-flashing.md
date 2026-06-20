@@ -34,6 +34,7 @@ Now open `src/config.h` in any text editor and fill in:
 
 - **WiFi name and password** — so the board can reach your network.
 - **MQTT host, username, password** — your Home Assistant / Mosquitto details (see [docs/04-home-assistant.md](04-home-assistant.md) if you don't have these yet).
+- **RADIO_CHIP_SX1276 / RADIO_CHIP_SX1262** — leave uncommented the one that matches the radio chip printed on your board's metal can. If unsure, start with SX1276 and switch if the radio won't start.
 - **STATION_ID** — your Davis "Station number" **minus 1** (Station 1 → `0`). This is important; it controls the exact timing the receiver expects.
 - **USE_IMPERIAL_UNITS** — `1` for °F/mph/inches, `0` for °C/km/h/mm.
 

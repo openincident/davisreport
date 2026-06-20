@@ -1,5 +1,5 @@
 // ===========================================================================
-// davis_radio.h  —  Listening to the Davis station with the SX1262 radio
+// davis_radio.h  —  Listening to the Davis station with the SX1276/SX1262 radio
 // ---------------------------------------------------------------------------
 // This file lists the tools for controlling the radio chip on the LilyGO board.
 // The real work is in davis_radio.cpp, where there's a long plain-English
