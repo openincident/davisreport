@@ -17,8 +17,14 @@
 // ===========================================================================
 
 #include <U8g2lib.h>
+#include <Wire.h>           // the low-level I2C library (used to probe for the screen)
 #include "davis_display.h"
 #include "config.h"
+
+// Remembers whether we actually found a screen. If we didn't (some board
+// variants wire it differently or omit it), every draw call simply does
+// nothing, so a missing screen can never stall the rest of the program.
+static bool displayPresent = false;
 
 // Create the screen object. This particular line says: an SSD1306 128x64 screen
 // connected over I2C (a 2-wire bus), with the reset, clock, and data pins taken
@@ -48,6 +54,27 @@ static const char *bearingToLabel(uint16_t degrees) {
 // displayBegin(): wake up the screen.
 // ---------------------------------------------------------------------------
 void displayBegin() {
+  // IMPORTANT: before handing control to the screen library, we make sure a
+  // screen is actually there. On some board variants the OLED is wired to
+  // different pins or isn't present at all. If we just started talking to a
+  // screen that doesn't answer, the I2C library can BLOCK waiting for a reply —
+  // long enough to trip the ESP32's interrupt watchdog, which reboots the
+  // board. That reboot-during-startup repeats forever (a "boot loop").
+  //
+  // To prevent that, we start the I2C bus ourselves with a short timeout, then
+  // send a quick "are you there?" to the screen's address. If nothing answers,
+  // we skip the screen entirely and let the radio/MQTT parts run normally.
+  Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL);
+  Wire.setTimeOut(50);                 // never wait more than 50 ms on the bus
+  Wire.beginTransmission(0x3C);        // 0x3C is the SSD1306 screen's I2C address
+  if (Wire.endTransmission() != 0) {   // non-zero = nobody answered
+    Serial.println(F("[display] no OLED found at 0x3C — running without a screen."));
+    displayPresent = false;
+    return;
+  }
+
+  // The screen answered, so it's safe to set it up.
+  displayPresent = true;
   oled.begin();
   oled.setFontMode(1);            // draw text without erasing a box behind it
   oled.clearBuffer();
@@ -55,6 +82,7 @@ void displayBegin() {
   oled.drawStr(0, 12, "Davis Weather");
   oled.drawStr(0, 30, "Starting up...");
   oled.sendBuffer();              // push what we drew to the actual screen
+  Serial.println(F("[display] OLED ready."));
 }
 
 // ---------------------------------------------------------------------------
@@ -62,6 +90,9 @@ void displayBegin() {
 // ---------------------------------------------------------------------------
 void displayShow(const DavisData *data, bool radioOk, float rssi,
                  bool wifiOk, bool mqttOk) {
+  // If there's no screen, there's nothing to draw — just return quietly.
+  if (!displayPresent) return;
+
   // A reusable little text buffer for formatting numbers into strings.
   char line[28];
 
