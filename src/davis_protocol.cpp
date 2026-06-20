@@ -179,10 +179,18 @@ void davisDecode(const uint8_t *packet, DavisData *data) {
       static uint8_t  previousCounter = 0xFF;   // 0xFF = "we haven't seen one yet"
       uint8_t currentCounter = packet[3] & 0x7F;
       if (previousCounter != 0xFF) {
-        // How many new tips since last time? The "& 0x7F" handles the wrap from
-        // 127 back to 0 cleanly (e.g. 125 -> 2 counts as 5 new tips).
-        uint8_t newTips = (currentCounter - previousCounter) & 0x7F;
-        data->rainClicksTotal += newTips;
+        // How many new tips since last time? The "& 0x7F" gives the forward
+        // distance around the 0..127 circle, which handles the wrap from 127
+        // back to 0 cleanly (e.g. 125 -> 2 counts as 5 new tips).
+        uint8_t forward = (currentCounter - previousCounter) & 0x7F;
+        // IMPORTANT: only count SMALL forward steps. Real rain adds at most a
+        // few tips between messages. If the counter appears to jump way forward
+        // (>= 64), that's actually the counter glitching slightly BACKWARD
+        // (a backward step of 1 looks like a forward step of 127). We ignore
+        // those, otherwise a tiny glitch would fake ~1.27 inches of rain.
+        if (forward < 64) {
+          data->rainClicksTotal += forward;
+        }
       }
       previousCounter = currentCounter;
       data->lastRainUpdate = now;
