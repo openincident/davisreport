@@ -123,6 +123,17 @@ IRAM_ATTR static void onPacketArrived() {
   packetWaitingFlag = true;
 }
 
+// Flip the order of the 8 bits in a byte (so 0b10110000 becomes 0b00001101).
+// We need this because the Davis station sends each byte least-significant-bit
+// first, while the radio hands bytes to us most-significant-bit first — so
+// every received byte arrives mirrored, and this puts it right.
+static uint8_t reverseByte(uint8_t b) {
+  b = (b & 0xF0) >> 4 | (b & 0x0F) << 4;   // swap the two nibbles (4-bit halves)
+  b = (b & 0xCC) >> 2 | (b & 0x33) << 2;   // swap adjacent bit-pairs
+  b = (b & 0xAA) >> 1 | (b & 0x55) << 1;   // swap adjacent bits
+  return b;
+}
+
 // ---------------------------------------------------------------------------
 // Our own tracking variables.
 // ---------------------------------------------------------------------------
@@ -166,8 +177,11 @@ bool radioBegin() {
   // uses. The arguments, in order, are:
   //   - starting frequency (MHz): begin on hop-pattern position 0's frequency
   //   - bit rate: 19.2 kilobits per second
-  //   - frequency deviation: 4.8 kHz (how far the frequency nudges per bit)
-  //   - receiver bandwidth: 29.3 kHz (how wide a slice of spectrum we listen to)
+  //   - frequency deviation: 9.5 kHz (how far the frequency nudges per bit).
+  //       NOTE: many guides copy "4.8 kHz" from one early project, but the real
+  //       on-air deviation is ~9.5 kHz. Using 4.8 makes the demodulator produce
+  //       garbage and the receiver never locks onto a real packet.
+  //   - receiver bandwidth: 25 kHz (how wide a slice of spectrum we listen to)
   //   - transmit power: 10 (we only listen, so this is irrelevant)
   //   - preamble length: 16 (a lead-in pattern; default is fine for receiving)
   float startFreq = CHANNEL_FREQ_MHZ[HOP_PATTERN[0]];
@@ -176,10 +190,12 @@ bool radioBegin() {
   // crystal) voltage — 1.8 V here — and the power-regulator choice. If the
   // radio fails to start, the TCXO voltage is the first thing to try changing
   // (some boards use 0, meaning "no TCXO", or 3.3). See docs/05-troubleshooting.
-  int status = radio.beginFSK(startFreq, 19.2f, 4.8f, 29.3f, 10, 16, 1.8f, false);
+  // The SX1262 has no separate AFC bandwidth, so we use a wider receive filter
+  // (50 kHz) to swallow the station's frequency offset instead.
+  int status = radio.beginFSK(startFreq, 19.2f, 9.5f, 50.0f, 10, 16, 1.8f, false);
 #else
   // The SX1276 uses the same FSK settings but has no TCXO argument.
-  int status = radio.beginFSK(startFreq, 19.2f, 4.8f, 25.0f, 10, 16);
+  int status = radio.beginFSK(startFreq, 19.2f, 9.5f, 25.0f, 10, 16);
 #endif
   if (status != RADIOLIB_ERR_NONE) {
     // A non-zero status means the radio didn't start. Usually a wiring/pin
@@ -192,16 +208,16 @@ bool radioBegin() {
   // --- Match the rest of Davis's framing so we recognize its messages. ---
 
   // The "sync word" is a fixed marker the station puts at the start of every
-  // message so receivers know "a real message starts here." Davis uses the two
-  // bytes 0xCB 0x89.
+  // message so receivers know "a real message starts here." Davis uses 0xCB 0x89.
   uint8_t syncWord[] = { 0xCB, 0x89 };
   radio.setSyncWord(syncWord, 2);
 
   // Every Davis message is exactly 10 bytes, so use fixed-length mode.
   radio.fixedPacketLengthMode(DAVIS_PACKET_LENGTH);
 
-  // Davis uses plain FSK with no special pulse shaping on our receive side.
-  radio.setDataShaping(RADIOLIB_SHAPING_NONE);
+  // Davis shapes its signal with a Gaussian filter (this is "GFSK"). Matching
+  // that shaping (BT=0.5) on our side improves how cleanly we lock onto it.
+  radio.setDataShaping(RADIOLIB_SHAPING_0_5);
 
   // The last few settings are spelled slightly differently on the two chips.
   // In both cases we're saying: turn OFF the chip's built-in checksum (we do
@@ -213,6 +229,16 @@ bool radioBegin() {
 #else
   radio.setCRC(false);                // no hardware checksum
   radio.setEncoding(RADIOLIB_ENCODING_NRZ);  // send bits as-is: no whitening/manchester
+
+  // ENABLE AFC (automatic frequency correction). This is essential: Davis
+  // transmitters sit ~20-28 kHz off their nominal frequency (crystal tolerance),
+  // so without AFC the signal lands at the edge of our filter and we only ever
+  // hear noise. The radio measures each incoming burst's offset and retunes to
+  // match. We give AFC a wider bandwidth (50 kHz) than the normal receive
+  // filter so it can first "find" the off-center signal, then lock it in.
+  radio.setAFCBandwidth(50.0);
+  radio.setAFC(true);
+  radio.setAFCAGCTrigger(RADIOLIB_SX127X_RX_TRIGGER_PREAMBLE_DETECT);
 #endif
 
   // Tell the radio to tap our handler the instant a full message arrives.
@@ -257,6 +283,11 @@ bool radioPoll(uint8_t *packetOut) {
       radio.startReceive();
       return false;
     }
+
+    // Un-mirror every byte (Davis sends bits least-significant first; the radio
+    // gives them to us most-significant first). After this, the bytes are the
+    // true Davis values that the checksum and decoder expect.
+    for (uint8_t i = 0; i < DAVIS_PACKET_LENGTH; i++) packetOut[i] = reverseByte(packetOut[i]);
 
     // ----- THE KEY CHECK -----
     // The radio can trigger on plain noise that happens to match Davis's short
