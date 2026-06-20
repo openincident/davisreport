@@ -111,7 +111,11 @@
 // -- SSD1306 OLED screen (connected over a bus called "I2C") --
 #define PIN_OLED_SDA    21   // I2C data line
 #define PIN_OLED_SCL    22   // I2C clock line
-#define PIN_OLED_RST    16   // OLED reset (LilyGO ties the screen's reset to GPIO16)
+// NOTE: the screen's reset is wired to GPIO16, but on this module GPIO16 is also
+// tied to internal memory (PSRAM) and driving it FREEZES the board. So we leave
+// it completely alone — the screen resets fine on power-up. (PIN unused below,
+// kept for reference only. Do NOT drive it.)
+#define PIN_OLED_RST    16
 
 // ---------------------------------------------------------------------------
 // 6. Optional tuning knobs (safe to leave at defaults)

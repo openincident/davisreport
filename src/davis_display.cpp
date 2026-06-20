@@ -35,9 +35,13 @@ static bool displayPresent = false;
 // connected over I2C (a 2-wire bus), with the reset, clock, and data pins taken
 // from config.h. "_F_" means we keep a full-screen buffer in memory and draw it
 // all at once (no flicker).
+// We pass U8X8_PIN_NONE for the reset pin on purpose: we pulse the reset line
+// (GPIO16) ourselves in displayBegin() BEFORE any I2C activity. Letting U8g2
+// drive the reset during its begin() can re-trigger the boot-loop on this board,
+// so we take that job away from it.
 static U8G2_SSD1306_128X64_NONAME_F_HW_I2C oled(
     U8G2_R0,           // no rotation
-    PIN_OLED_RST,      // reset pin
+    U8X8_PIN_NONE,     // reset handled manually (see displayBegin)
     PIN_OLED_SCL,      // clock pin
     PIN_OLED_SDA);     // data pin
 
@@ -68,16 +72,20 @@ void displayBegin() {
     return;
   }
 
-  // IMPORTANT: before handing control to the screen library, we make sure a
-  // screen is actually there. On some board variants the OLED is wired to
-  // different pins or isn't present at all. If we just started talking to a
-  // screen that doesn't answer, the I2C library can BLOCK waiting for a reply —
-  // long enough to trip the ESP32's interrupt watchdog, which reboots the
-  // board. That reboot-during-startup repeats forever (a "boot loop").
-  //
-  // To prevent that, we start the I2C bus ourselves with a short timeout, then
-  // send a quick "are you there?" to the screen's address. If nothing answers,
-  // we skip the screen entirely and let the radio/MQTT parts run normally.
+  // STEP 1: hardware-reset the screen FIRST, before any I2C traffic. On this
+  // board the SSD1306's reset wire is GPIO16. Until we pulse it, the screen
+  // powers up in an undefined state and can hold the I2C data line low, which
+  // jams the bus and hangs the whole board (this was the cause of the earlier
+  // boot loop). The pulse is: drive it low, wait, drive it high, wait.
+  // NOTE: we deliberately do NOT drive the "OLED reset" pin (GPIO16) on this
+  // board. Doing so freezes the ESP32 — on this module GPIO16 is tied to
+  // internal memory (PSRAM), not a safe reset line. The screen resets fine on
+  // power-up without us touching it.
+
+  // STEP 2: bring up the I2C bus and make sure a screen actually answers. We
+  // give it a short timeout and send a quick "are you there?" to the screen's
+  // address, so that a missing or mis-wired screen can never wedge us — if
+  // nothing answers we just skip the screen and run headless.
   Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL);
   Wire.setTimeOut(50);                 // never wait more than 50 ms on the bus
   Wire.beginTransmission(0x3C);        // 0x3C is the SSD1306 screen's I2C address
@@ -87,8 +95,10 @@ void displayBegin() {
     return;
   }
 
-  // The screen answered, so it's safe to set it up.
+  // STEP 3: the screen answered, so set it up. (U8g2 wants the address in its
+  // 8-bit form, hence the shift.)
   displayPresent = true;
+  oled.setI2CAddress(0x3C << 1);
   oled.begin();
   oled.setFontMode(1);            // draw text without erasing a box behind it
   oled.clearBuffer();
