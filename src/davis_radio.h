@@ -41,4 +41,9 @@ float radioGetRssi();
 // hopping pattern; false while we're still searching for it.
 bool radioIsLocked();
 
+// Returns how many receptions failed the Davis checksum (usually radio noise).
+// A steadily climbing count with no good packets means we're hearing static,
+// not the station — see docs/05-troubleshooting.md.
+uint32_t radioBadCount();
+
 #endif // DAVIS_RADIO_H

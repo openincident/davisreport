@@ -135,7 +135,8 @@ static RadioState state = STATE_ACQUIRING;
 static uint8_t  patternPosition = 0;     // where we think we are in HOP_PATTERN (0..50)
 static uint32_t nextExpectedMs = 0;      // when we expect the next message to arrive
 static uint8_t  consecutiveMisses = 0;   // how many we've missed in a row
-static float    lastRssi = -999.0f;      // signal strength of the last message
+static float    lastRssi = -999.0f;      // signal strength of the last thing we received
+static uint32_t badPacketCount = 0;      // receptions that FAILED the Davis checksum (usually noise)
 
 // ---------------------------------------------------------------------------
 // Small helper: tune the radio to a given position in the hop pattern and
@@ -232,36 +233,52 @@ bool radioBegin() {
 bool radioPoll(uint8_t *packetOut) {
   uint32_t now = millis();
 
-  // === CASE 1: a message just arrived. ===================================
+  // === CASE 1: the radio received SOMETHING. =============================
   if (packetWaitingFlag) {
     packetWaitingFlag = false;     // clear the flag for next time
 
     // Pull the 10 raw bytes out of the radio.
     int status = radio.readData(packetOut, DAVIS_PACKET_LENGTH);
-    lastRssi = radio.getRSSI();    // note how strong the signal was
+    lastRssi = radio.getRSSI();    // note how strong the signal was (handy even for noise)
 
-    // Whether or not the read worked, we must restart receiving afterward.
-    if (status == RADIOLIB_ERR_NONE) {
-      // Great — we caught one. We were tuned to `patternPosition`, so now we
-      // know exactly where the station is. Switch to (or stay in) tracking.
-      if (state == STATE_ACQUIRING) {
-        Serial.println(F("[radio] locked on! Now following the hop pattern."));
-      }
-      state = STATE_TRACKING;
-      consecutiveMisses = 0;
-
-      // Schedule when the next message should arrive, then hop ahead to the
-      // next frequency so we're waiting there before the station transmits.
-      nextExpectedMs  = now + transmitIntervalMs;
-      patternPosition = (patternPosition + 1) % NUM_CHANNELS;
-      tuneToPatternPosition(patternPosition);
-
-      return true;   // tell the caller a fresh packet is ready in packetOut
-    } else {
-      // The read failed (rare). Just resume listening where we are.
+    // If the read itself errored (rare), just resume listening where we are.
+    if (status != RADIOLIB_ERR_NONE) {
       radio.startReceive();
       return false;
     }
+
+    // ----- THE KEY CHECK -----
+    // The radio can trigger on plain noise that happens to match Davis's short
+    // 2-byte start marker. Those "packets" are garbage and FAIL the checksum.
+    // We must verify the checksum HERE, before we treat this as the real
+    // station — otherwise a burst of noise would drag us off into chasing a
+    // station that isn't there, and we'd never catch the actual one.
+    if (!davisCrcValid(packetOut)) {
+      badPacketCount++;
+      // It's noise. Don't change our lock/searching state and don't move — just
+      // keep listening on the SAME channel. If we're still searching, that means
+      // we stay parked on channel 0 waiting for a genuine packet.
+      radio.startReceive();
+      return false;
+    }
+
+    // ----- A REAL, checksum-valid Davis packet! -----
+    if (state == STATE_ACQUIRING) {
+      // We were parked on channel 0 waiting; a valid packet here means the
+      // station is at the very start of its hop pattern, so now we know exactly
+      // where it is and can follow along.
+      Serial.println(F("[radio] locked on! Now following the hop pattern."));
+    }
+    state = STATE_TRACKING;
+    consecutiveMisses = 0;
+
+    // Schedule when the next message should arrive, then hop ahead to the next
+    // frequency so we're waiting there before the station transmits.
+    nextExpectedMs  = now + transmitIntervalMs;
+    patternPosition = (patternPosition + 1) % NUM_CHANNELS;
+    tuneToPatternPosition(patternPosition);
+
+    return true;   // tell the caller a fresh, valid packet is ready in packetOut
   }
 
   // === CASE 2: no message yet — decide whether we've "missed" one. ========
@@ -296,5 +313,6 @@ bool radioPoll(uint8_t *packetOut) {
 // ---------------------------------------------------------------------------
 // Simple status getters used by the display.
 // ---------------------------------------------------------------------------
-float radioGetRssi()  { return lastRssi; }
-bool  radioIsLocked() { return state == STATE_TRACKING; }
+float    radioGetRssi()  { return lastRssi; }
+bool     radioIsLocked() { return state == STATE_TRACKING; }
+uint32_t radioBadCount() { return badPacketCount; }

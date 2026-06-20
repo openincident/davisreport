@@ -89,19 +89,12 @@ void loop() {
 
   // 2. Ask the radio whether a new weather message has arrived. This also keeps
   //    the frequency-hopping in sync, so we call it as often as possible.
+  //    radioPoll() only returns true for REAL, checksum-verified packets — it
+  //    silently discards noise on its own — so anything we get here is good.
   if (radioPoll(packet)) {
-    // A message arrived! First make sure it isn't garbled.
-    if (davisCrcValid(packet)) {
-      // Good message: pull the weather values out of it and count it.
-      davisDecode(packet, &weather);
-      weather.goodPacketCount++;
-
-      // Push the fresh readings to Home Assistant.
-      mqttPublish(&weather, radioGetRssi(), radioIsLocked());
-    } else {
-      // Garbled message (radio noise). Count it and ignore it.
-      weather.badPacketCount++;
-    }
+    davisDecode(packet, &weather);     // pull the weather values out of it
+    weather.goodPacketCount++;
+    mqttPublish(&weather, radioGetRssi(), radioIsLocked());  // send to Home Assistant
   }
 
   // 3. Refresh the on-screen display about twice a second. We also use this
@@ -128,7 +121,7 @@ void loop() {
       radioIsLocked() ? "YES" : "no",
       (int)radioGetRssi(),
       (unsigned long)weather.goodPacketCount,
-      (unsigned long)weather.badPacketCount,
+      (unsigned long)radioBadCount(),
       weather.tempF, weather.humidityPct, weather.windSpeedMph,
       weather.windDirDegrees, weather.windGustMph,
       weather.rainClicksTotal * 0.01f,
