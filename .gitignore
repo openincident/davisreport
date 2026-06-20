@@ -8,6 +8,10 @@
 .pioenvs/
 .piolibdeps/
 
+# Project-local Python virtual environment that holds the PlatformIO build tool.
+# It's specific to this machine, so we don't commit it.
+.venv/
+
 # Your PRIVATE settings (WiFi password, MQTT login, etc.).
 # We commit "config.h.example" as a template, but the REAL config.h
 # holds secrets and must stay on your machine only.
