@@ -34,6 +34,9 @@ static uint8_t packet[DAVIS_PACKET_LENGTH];
 // times per second (which would waste effort and flicker).
 static uint32_t lastDisplayMs = 0;
 
+// Remember when we last printed the serial status summary (see loop()).
+static uint32_t lastStatusMs = 0;
+
 // ---------------------------------------------------------------------------
 // setup(): one-time startup.
 // ---------------------------------------------------------------------------
@@ -111,5 +114,25 @@ void loop() {
     // Re-send readings periodically even with no new packet, so Home Assistant
     // never marks the sensors stale. (mqttPublish decides if it's time.)
     mqttPublish(&weather, radioGetRssi(), radioIsLocked());
+  }
+
+  // 4. Every few seconds, print a one-line status summary to the serial log.
+  //    This is our "dashboard" when running headless: it shows whether we're
+  //    locked on, how many good vs. garbled messages we've received (a measure
+  //    of reception quality), the signal strength, the current readings, and
+  //    whether WiFi/MQTT are connected.
+  if (now - lastStatusMs >= 5000) {
+    lastStatusMs = now;
+    Serial.printf(
+      "[status] lock=%s rssi=%ddBm good=%lu bad=%lu | %.1fF %.0f%%RH wind=%.0fmph dir=%u gust=%.0f rain=%.2fin | wifi=%s mqtt=%s\n",
+      radioIsLocked() ? "YES" : "no",
+      (int)radioGetRssi(),
+      (unsigned long)weather.goodPacketCount,
+      (unsigned long)weather.badPacketCount,
+      weather.tempF, weather.humidityPct, weather.windSpeedMph,
+      weather.windDirDegrees, weather.windGustMph,
+      weather.rainClicksTotal * 0.01f,
+      wifiIsConnected() ? "Y" : "n",
+      mqttIsConnected() ? "Y" : "n");
   }
 }
