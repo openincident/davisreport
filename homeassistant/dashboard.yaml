@@ -1,0 +1,83 @@
+# ===========================================================================
+# Example Home Assistant dashboard card for the Davis weather station.
+# ---------------------------------------------------------------------------
+# HOW TO USE:
+#   - Edit a dashboard, add a "Manual" card, and paste this in; OR
+#   - Edit the dashboard "in YAML" and paste this under the cards: list.
+#
+# NOTE ON ENTITY NAMES:
+#   These names assume the device is called "Davis Weather Station" (the default
+#   DEVICE_NAME in config.h), which makes Home Assistant name the entities like
+#   sensor.davis_weather_station_temperature. If you changed DEVICE_NAME, update
+#   the entity ids below to match what shows up under Settings -> Devices.
+# ===========================================================================
+
+type: vertical-stack
+cards:
+  # --- A row of at-a-glance gauges for the headline numbers ---
+  - type: horizontal-stack
+    cards:
+      - type: gauge
+        name: Temperature
+        entity: sensor.davis_weather_station_temperature
+        needle: true
+        min: 0
+        max: 120          # adjust to your climate (this assumes °F)
+        severity:
+          green: 50
+          yellow: 90
+          red: 100
+      - type: gauge
+        name: Humidity
+        entity: sensor.davis_weather_station_humidity
+        min: 0
+        max: 100
+      - type: gauge
+        name: Wind
+        entity: sensor.davis_weather_station_wind_speed
+        needle: true
+        min: 0
+        max: 40           # adjust (mph)
+
+  # --- The full list of readings ---
+  - type: entities
+    title: Davis Weather Station
+    show_header_toggle: false
+    entities:
+      - entity: sensor.davis_weather_station_temperature
+        name: Temperature
+      - entity: sensor.davis_weather_station_humidity
+        name: Humidity
+      - entity: sensor.davis_weather_station_wind_speed
+        name: Wind Speed
+      - entity: sensor.davis_weather_station_wind_gust
+        name: Wind Gust
+      - entity: sensor.davis_weather_station_wind_direction
+        name: Wind Direction
+      - entity: sensor.davis_weather_station_rain_rate
+        name: Rain Rate
+      - entity: sensor.davis_weather_station_rain_total
+        name: Rain Total
+      - entity: sensor.davis_weather_station_solar_radiation
+        name: Solar Radiation
+
+  # --- Health / diagnostics (collapsible) ---
+  - type: entities
+    title: Station Health
+    show_header_toggle: false
+    entities:
+      - entity: sensor.davis_weather_station_signal_strength
+        name: Signal Strength
+      - entity: sensor.davis_weather_station_supercap_voltage
+        name: Supercap Voltage
+      - entity: binary_sensor.davis_weather_station_battery_low
+        name: Battery Low
+
+  # --- A 24-hour history graph of the main values ---
+  - type: history-graph
+    title: Last 24 hours
+    hours_to_show: 24
+    entities:
+      - sensor.davis_weather_station_temperature
+      - sensor.davis_weather_station_humidity
+      - sensor.davis_weather_station_wind_speed

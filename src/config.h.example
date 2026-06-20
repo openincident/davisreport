@@ -1,0 +1,90 @@
+// ===========================================================================
+// config.h.example  —  YOUR PERSONAL SETTINGS TEMPLATE
+// ---------------------------------------------------------------------------
+// HOW TO USE THIS FILE:
+//   1. Make a COPY of this file in the same folder and name the copy
+//      "config.h" (drop the ".example").
+//   2. Fill in your WiFi name/password and your MQTT (Home Assistant) details.
+//   3. Save. That's it — the rest of the program reads its settings from here.
+//
+// WHY A COPY?  The copy ("config.h") contains your WiFi and MQTT passwords, so
+// it is deliberately kept OUT of the public GitHub repository (see .gitignore).
+// This template, with no real passwords in it, is the only version that gets
+// shared publicly.
+// ===========================================================================
+
+#ifndef CONFIG_H
+#define CONFIG_H
+
+// ---------------------------------------------------------------------------
+// 1. WiFi — how the board gets on your home network
+// ---------------------------------------------------------------------------
+// The board needs WiFi so it can send weather readings to Home Assistant.
+#define WIFI_SSID      "YourWiFiName"        // the name of your WiFi network
+#define WIFI_PASSWORD  "YourWiFiPassword"    // the WiFi password
+
+// ---------------------------------------------------------------------------
+// 2. MQTT — the "post office" that Home Assistant listens to
+// ---------------------------------------------------------------------------
+// MQTT is a simple messaging system. The board publishes ("posts") weather
+// readings, and Home Assistant subscribes ("reads") them. The broker is the
+// post office in the middle. If you use Home Assistant OS with the Mosquitto
+// add-on, the broker IP is usually your Home Assistant's IP address.
+#define MQTT_HOST      "192.168.73.XXX"      // IP address of your MQTT broker (Mosquitto)
+#define MQTT_PORT      1883                  // standard MQTT port; leave as-is unless you changed it
+#define MQTT_USER      "mqtt_username"       // the MQTT login you created in Home Assistant
+#define MQTT_PASSWORD  "mqtt_password"       // the matching MQTT password
+
+// A short name for THIS device on the network. It shows up in Home Assistant
+// and is used to build the topic names. Stick to letters, numbers, and
+// underscores (no spaces).
+#define DEVICE_ID      "davis_iss"
+#define DEVICE_NAME    "Davis Weather Station"   // friendly name shown in Home Assistant
+
+// ---------------------------------------------------------------------------
+// 3. Your Davis station's transmitter ID
+// ---------------------------------------------------------------------------
+// Every Davis sensor suite is set to a transmitter ID from 1 to 8 (you pick it
+// with the dip switches inside the ISS; the console calls it "Station ID").
+// IMPORTANT: subtract 1 here. If your console shows Station 1, put 0 below.
+// This ID controls the exact timing between transmissions, so it must match.
+#define STATION_ID     0     // console "Station 1" => 0, "Station 2" => 1, etc.
+
+// ---------------------------------------------------------------------------
+// 4. Units — how readings are shown and published
+// ---------------------------------------------------------------------------
+// Set to 1 for US/Imperial units (Fahrenheit, mph, inches).
+// Set to 0 for Metric units (Celsius, km/h, millimeters).
+#define USE_IMPERIAL_UNITS  1
+
+// ---------------------------------------------------------------------------
+// 5. Hardware pin map — how the radio and screen are wired to the ESP32
+// ---------------------------------------------------------------------------
+// These are the factory wiring connections on the LilyGO T3 v1.6.1. You should
+// NOT need to change these unless you have a different board revision. If the
+// radio never starts up (see the serial monitor), double-check these against
+// your board's documentation — see docs/01-hardware-and-wiring.md.
+
+// -- SX1276 radio chip (connected over a bus called "SPI") --
+#define PIN_LORA_SCK    5    // SPI clock
+#define PIN_LORA_MISO   19   // SPI data: radio -> ESP32
+#define PIN_LORA_MOSI   27   // SPI data: ESP32 -> radio
+#define PIN_LORA_CS     18   // "chip select" — tells the radio we're talking to it
+#define PIN_LORA_RST    23   // reset line for the radio
+#define PIN_LORA_DIO0   26   // "interrupt" pin: radio raises this when a packet arrives
+#define PIN_LORA_DIO1   33   // secondary interrupt pin (used by RadioLib)
+
+// -- SSD1306 OLED screen (connected over a bus called "I2C") --
+#define PIN_OLED_SDA    21   // I2C data line
+#define PIN_OLED_SCL    22   // I2C clock line
+#define PIN_OLED_RST    16   // OLED reset (LilyGO ties the screen's reset to GPIO16)
+
+// ---------------------------------------------------------------------------
+// 6. Optional tuning knobs (safe to leave at defaults)
+// ---------------------------------------------------------------------------
+// How often (in seconds) to re-send EVERY reading to Home Assistant even if the
+// value hasn't changed. This keeps Home Assistant from marking sensors as
+// "unavailable" during calm weather. 300 = every 5 minutes.
+#define MQTT_REPUBLISH_SECONDS  300
+
+#endif // CONFIG_H

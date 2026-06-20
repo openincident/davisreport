@@ -1,0 +1,24 @@
+# ---------------------------------------------------------------------------
+# Things we never want to commit to the public repository.
+# ---------------------------------------------------------------------------
+
+# PlatformIO build output and downloaded libraries/toolchains.
+# These are regenerated automatically, so there's no reason to store them.
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Your PRIVATE settings (WiFi password, MQTT login, etc.).
+# We commit "config.h.example" as a template, but the REAL config.h
+# holds secrets and must stay on your machine only.
+src/config.h
+
+# Editor / IDE noise.
+.vscode/
+.idea/
+*.swp
+*~
+
+# Operating-system junk files.
+.DS_Store
+Thumbs.db
