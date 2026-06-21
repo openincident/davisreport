@@ -114,6 +114,130 @@ static void loadLive() {
   }
 }
 
+// ===========================================================================
+// LONG-TERM STORE — one summary record per HOUR (min/avg/max), kept ~180 days
+// in a circular flash file. This is the on-board archive that feeds the
+// "long-term" charts on the page. It's tiny (~82 KB) and writes only once an
+// hour, so flash wear is negligible (a sector erase roughly once a week).
+// ===========================================================================
+#define LONG_FILE   "/longterm.dat"
+#define LONG_MAGIC  0x44415648              // "DAVH"
+#define LONG_DAYS   180
+#define LONG_POINTS (LONG_DAYS * 24)        // 4320 hourly records
+#define LONG_HDR    8                       // magic(4) + count(2) + head(2)
+
+// One stored hour. Packed so the on-flash size is predictable. Temps are °F x10.
+struct __attribute__((packed)) HourRec {
+  uint32_t hour;                  // epoch seconds at the start of the hour
+  int16_t  tAvg, tMin, tMax;      // temperature °F x10
+  int16_t  dAvg;                  // dew point °F x10
+  uint8_t  hAvg, hMin, hMax;      // humidity %
+  uint8_t  wAvg, gMax;            // wind avg, gust max (mph)
+  uint16_t rain100;               // rain that hour, inches x100
+};
+static uint16_t longCount = 0, longHead = 0;
+
+// The running accumulator for the hour currently in progress (lives in RAM).
+struct HourAcc {
+  uint32_t hour;                  // which epoch-hour we're summing (0 = none yet)
+  uint32_t n;                     // how many samples so far this hour
+  double   tSum, dSum;            // sums (in x10 units) for the averages
+  int16_t  tMin, tMax;
+  uint32_t hSum; uint8_t hMin, hMax;
+  uint32_t wSum; uint8_t gMax;
+  uint16_t rainStart100, lastRain100;
+};
+static HourAcc acc;
+
+// Create the long-term file (full size, zero-filled) the first time, or read
+// its header if it already exists.
+static void longInit() {
+  if (!fsReady) return;
+  memset(&acc, 0, sizeof(acc));
+  File f = LittleFS.open(LONG_FILE, "r");
+  if (f) {
+    uint32_t m = 0;
+    if (f.read((uint8_t *)&m, 4) == 4 && m == LONG_MAGIC) {
+      f.read((uint8_t *)&longCount, 2);
+      f.read((uint8_t *)&longHead, 2);
+      f.close();
+      Serial.printf("[web] long-term store: %u hourly records\n", longCount);
+      return;
+    }
+    f.close();
+  }
+  Serial.println(F("[web] creating long-term store (~82 KB)..."));
+  File w = LittleFS.open(LONG_FILE, "w");
+  if (!w) return;
+  uint32_t magic = LONG_MAGIC; uint16_t z = 0;
+  w.write((uint8_t *)&magic, 4); w.write((uint8_t *)&z, 2); w.write((uint8_t *)&z, 2);
+  HourRec blank; memset(&blank, 0, sizeof(blank));
+  for (uint16_t i = 0; i < LONG_POINTS; i++) w.write((uint8_t *)&blank, sizeof(blank));
+  w.close();
+  longCount = 0; longHead = 0;
+}
+
+// Append one finished hour to the circular file (overwriting the oldest once
+// full), and update the header.
+static void longAppend(const HourRec &r) {
+  if (!fsReady) return;
+  File f = LittleFS.open(LONG_FILE, "r+");
+  if (!f) return;
+  f.seek(LONG_HDR + (uint32_t)longHead * sizeof(HourRec));
+  f.write((const uint8_t *)&r, sizeof(HourRec));
+  longHead = (uint16_t)((longHead + 1) % LONG_POINTS);
+  if (longCount < LONG_POINTS) longCount++;
+  f.seek(4);
+  f.write((uint8_t *)&longCount, 2);
+  f.write((uint8_t *)&longHead, 2);
+  f.close();
+}
+
+// Turn the in-progress accumulator into a stored record.
+static void longFinalize() {
+  if (acc.hour == 0 || acc.n == 0) return;
+  HourRec r;
+  r.hour    = acc.hour * 3600UL;
+  r.tAvg    = (int16_t)lround(acc.tSum / acc.n);
+  r.tMin    = acc.tMin; r.tMax = acc.tMax;
+  r.dAvg    = (int16_t)lround(acc.dSum / acc.n);
+  r.hAvg    = (uint8_t)(acc.hSum / acc.n); r.hMin = acc.hMin; r.hMax = acc.hMax;
+  r.wAvg    = (uint8_t)(acc.wSum / acc.n); r.gMax = acc.gMax;
+  r.rain100 = (acc.lastRain100 >= acc.rainStart100)
+                ? (uint16_t)(acc.lastRain100 - acc.rainStart100) : 0;
+  longAppend(r);
+}
+
+// HOUR_DIVISOR is normally 3600 (seconds per hour). It's a #define only so the
+// test harness can shrink "an hour" to a minute and exercise the rollover fast.
+#ifndef HOUR_DIVISOR
+#define HOUR_DIVISOR 3600UL
+#endif
+
+// Feed one live sample into the current hour's accumulator; roll over and store
+// when the hour changes. Called every web sample while locked.
+static void longTick(uint32_t epoch, float tF, float dF,
+                     uint8_t hum, uint8_t wind, uint8_t gust, uint16_t rain100) {
+  uint32_t hr = epoch / HOUR_DIVISOR;
+  int16_t t10 = (int16_t)lroundf(tF * 10.0f);
+  if (acc.hour != hr) {                 // new hour (or the very first sample)
+    if (acc.hour != 0) longFinalize();  // close out the previous hour
+    memset(&acc, 0, sizeof(acc));
+    acc.hour = hr;
+    acc.tMin = acc.tMax = t10;
+    acc.hMin = acc.hMax = hum;
+    acc.rainStart100 = rain100;
+  }
+  acc.n++;
+  acc.tSum += tF * 10.0f; acc.dSum += dF * 10.0f;
+  if (t10 < acc.tMin) acc.tMin = t10;
+  if (t10 > acc.tMax) acc.tMax = t10;
+  acc.hSum += hum; if (hum < acc.hMin) acc.hMin = hum; if (hum > acc.hMax) acc.hMax = hum;
+  acc.wSum += wind; if (gust > acc.gMax) acc.gMax = gust;
+  if (rain100 < acc.rainStart100) acc.rainStart100 = rain100;  // rain counter reset on reboot
+  acc.lastRain100 = rain100;
+}
+
 // The most recent values (kept fresh every call, for the page header).
 static Sample   cur;
 static uint16_t curDir = 0;
@@ -175,6 +299,11 @@ static const char PAGE_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
   a:hover { text-decoration:underline; }
   #needle { transition:transform .6s ease; }
   #compass text { font-family:system-ui,sans-serif; }
+  h2 { font-size:16px; margin:26px 0 8px; }
+  .lt-controls { margin-bottom:12px; }
+  .lt-controls button { background:var(--card); color:var(--ink); border:1px solid #2a3445;
+    padding:6px 12px; border-radius:8px; margin-right:6px; cursor:pointer; font-size:13px; }
+  .lt-controls button.on { background:var(--accent); color:#04202e; border-color:var(--accent); font-weight:600; }
 </style>
 </head>
 <body>
@@ -213,7 +342,18 @@ static const char PAGE_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
   <div class="chartcard"><h3>Humidity</h3><canvas id="cHum" height="100"></canvas></div>
   <div class="chartcard"><h3>Wind &amp; Gust</h3><canvas id="cWind" height="100"></canvas></div>
   <div class="chartcard"><h3>Rain (since startup)</h3><canvas id="cRain" height="100"></canvas></div>
-  <footer id="foot">Served by the LilyGO board · history resets when the board reboots</footer>
+
+  <h2>Long-term history</h2>
+  <div class="lt-controls" id="ltSpan">
+    <button data-d="7">7 days</button><button data-d="30">30 days</button>
+    <button data-d="90" class="on">90 days</button><button data-d="180">180 days</button>
+  </div>
+  <div class="chartcard"><h3>Temperature — avg with min/max band</h3><canvas id="cLT_temp" height="120"></canvas></div>
+  <div class="chartcard"><h3>Humidity — avg with min/max band</h3><canvas id="cLT_hum" height="100"></canvas></div>
+  <div class="chartcard"><h3>Wind avg &amp; gust max</h3><canvas id="cLT_wind" height="100"></canvas></div>
+  <div class="chartcard"><h3>Rain per hour</h3><canvas id="cLT_rain" height="100"></canvas></div>
+
+  <footer id="foot">Served by the LilyGO board · live history resets when the board reboots</footer>
 </div>
 <script>
 const charts = {};
@@ -250,8 +390,59 @@ function init() {
   charts.hum  = mkChart('cHum',  [{label:'Humidity %', color:'#7ee787', area:true, fill:'rgba(126,231,135,.12)'}], {y:{min:0,max:100}});
   charts.wind = mkChart('cWind', [{label:'Wind', color:'#a5a5ff'}, {label:'Gust', color:'#ff5252'}], {y:{min:0}});
   charts.rain = mkChart('cRain', [{label:'Rain', color:'#4cc2ff', area:true, fill:'rgba(76,194,255,.18)'}], {y:{min:0}});
+  initLong();
   refresh();
   setInterval(refresh, 30000);
+}
+// ---- Long-term charts (fed by /longterm.json, hourly min/avg/max) ----
+const lt = {}; let ltDays = 90;
+function mkBand(id, color, band, opts={}) {
+  // 3 datasets: max (fills down to min = the shaded band), min (invisible), avg (line).
+  return new Chart(document.getElementById(id), {
+    type:'line',
+    data:{labels:[], datasets:[
+      {label:'max', data:[], borderColor:'transparent', backgroundColor:band, fill:'+1', pointRadius:0, tension:.3},
+      {label:'min', data:[], borderColor:'transparent', fill:false, pointRadius:0, tension:.3},
+      {label:'avg', data:[], borderColor:color, borderWidth:2, fill:false, pointRadius:0, tension:.3} ]},
+    options:{animation:false, responsive:true, interaction:{intersect:false,mode:'index'},
+      scales:{x:{ticks:{color:'#8b98a9',maxTicksLimit:8},grid:{color:'#232c3b'}},
+              y:{ticks:{color:'#8b98a9'},grid:{color:'#232c3b'},...(opts.y||{})}},
+      plugins:{legend:{display:false}}}});
+}
+function initLong() {
+  lt.temp = mkBand('cLT_temp', '#ff8a5b', 'rgba(255,138,91,.16)');
+  lt.hum  = mkBand('cLT_hum',  '#7ee787', 'rgba(126,231,135,.16)', {y:{min:0,max:100}});
+  lt.wind = mkChart('cLT_wind', [{label:'Wind avg', color:'#a5a5ff'}, {label:'Gust max', color:'#ff5252'}], {y:{min:0}});
+  lt.rain = new Chart(document.getElementById('cLT_rain'), {type:'bar',
+    data:{labels:[], datasets:[{label:'Rain/hr', data:[], backgroundColor:'#4cc2ff'}]},
+    options:{animation:false, responsive:true,
+      scales:{x:{ticks:{color:'#8b98a9',maxTicksLimit:8},grid:{display:false}},
+              y:{min:0, ticks:{color:'#8b98a9'}, grid:{color:'#232c3b'}}},
+      plugins:{legend:{display:false}}}});
+  document.querySelectorAll('#ltSpan button').forEach(b => b.onclick = () => {
+    ltDays = +b.dataset.d;
+    document.querySelectorAll('#ltSpan button').forEach(x => x.classList.toggle('on', x===b));
+    refreshLong();
+  });
+  refreshLong();
+  setInterval(refreshLong, 300000);   // long-term changes hourly; refresh every 5 min
+}
+async function refreshLong() {
+  let d; try { d = await (await fetch('longterm.json?days='+ltDays)).json(); } catch(e){ return; }
+  const R = d.rows;   // [hour,tAvg,tMin,tMax,dAvg,hAvg,hMin,hMax,wAvg,gMax,rain]
+  const fmt = ltDays <= 7 ? {month:'short',day:'numeric',hour:'2-digit'} : {month:'short',day:'numeric'};
+  const labels = R.map(r => new Date(r[0]*1000).toLocaleDateString([], fmt));
+  const c = i => R.map(r => r[i]);
+  setBand(lt.temp, labels, c(3), c(2), c(1));        // tMax,tMin,tAvg
+  setBand(lt.hum,  labels, c(7), c(6), c(5), {floor:0,ceil:100});  // hMax,hMin,hAvg
+  setData(lt.wind, labels, [c(8), c(9)], {floor:0}); // wAvg, gMax
+  lt.rain.data.labels = labels; lt.rain.data.datasets[0].data = c(10); lt.rain.update();
+}
+function setBand(ch, labels, max, min, avg, range) {
+  ch.data.labels = labels;
+  ch.data.datasets[0].data = max; ch.data.datasets[1].data = min; ch.data.datasets[2].data = avg;
+  autoRange(ch, range);   // spans min..max already since all three series are included
+  ch.update();
 }
 function card(label, val, unit) {
   return `<div class="card"><div class="label">${label}</div><div class="val">${val}<small> ${unit||''}</small></div></div>`;
@@ -424,17 +615,82 @@ static void handleMetrics() {
   server.send(200, "text/plain; version=0.0.4", b);
 }
 
+// ---------------------------------------------------------------------------
+// /longterm.json?days=N — the hourly archive for the long-term charts. Returns
+// rows [hourEpoch, tAvg, tMin, tMax, dAvg, hAvg, hMin, hMax, wAvg, gMax, rain]
+// for the last N days, downsampled to ~600 points so the chart stays snappy.
+// ---------------------------------------------------------------------------
+static void handleLongterm() {
+  int days = server.hasArg("days") ? server.arg("days").toInt() : 180;
+  if (days < 1) days = 1;
+  if (days > LONG_DAYS) days = LONG_DAYS;
+  uint32_t now = (uint32_t)time(nullptr);
+  uint32_t cutoff = (now > (uint32_t)days * 86400UL) ? now - (uint32_t)days * 86400UL : 0;
+
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "application/json", "");
+  char buf[220];
+  snprintf(buf, sizeof(buf), "{\"now\":%lu,\"days\":%d,\"tempUnit\":\"%s\",\"rows\":[",
+           (unsigned long)now, days, USE_IMPERIAL_UNITS ? "\\u00b0F" : "\\u00b0C");
+  server.sendContent(buf);
+
+  if (fsReady && longCount > 0) {
+    File f = LittleFS.open(LONG_FILE, "r");
+    if (f) {
+      uint16_t oldest = (uint16_t)((longHead + LONG_POINTS - longCount) % LONG_POINTS);
+      // Downsample: at most ~600 points. Records are hourly, so days*24 bounds it.
+      uint32_t inSpan = (uint32_t)days * 24; if (inSpan > longCount) inSpan = longCount;
+      uint16_t stride = (inSpan > 600) ? (uint16_t)(inSpan / 600) : 1;
+      uint16_t seen = 0; bool first = true;
+      for (uint16_t i = 0; i < longCount; i++) {
+        uint16_t idx = (uint16_t)((oldest + i) % LONG_POINTS);
+        HourRec r;
+        f.seek(LONG_HDR + (uint32_t)idx * sizeof(HourRec));
+        f.read((uint8_t *)&r, sizeof(r));
+        if (r.hour == 0 || r.hour < cutoff) continue;
+        if ((seen++ % stride) != 0) continue;
+        snprintf(buf, sizeof(buf),
+          "%s[%lu,%.1f,%.1f,%.1f,%.1f,%u,%u,%u,%u,%u,%.2f]",
+          first ? "" : ",", (unsigned long)r.hour,
+          outTemp(r.tAvg / 10.0f), outTemp(r.tMin / 10.0f), outTemp(r.tMax / 10.0f),
+          outTemp(r.dAvg / 10.0f), r.hAvg, r.hMin, r.hMax,
+          (unsigned)outWind(r.wAvg), (unsigned)outWind(r.gMax), outRain(r.rain100 / 100.0f));
+        server.sendContent(buf);
+        first = false;
+      }
+      f.close();
+    }
+  }
+  server.sendContent("]}");
+}
+
+// /clear?confirm=yes — wipe all stored history (live ring + long-term store).
+static void handleClear() {
+  if (server.arg("confirm") != "yes") {
+    server.send(400, "text/plain", "To erase all stored history, call /clear?confirm=yes");
+    return;
+  }
+  if (fsReady) { LittleFS.remove(LIVE_FILE); LittleFS.remove(LONG_FILE); }
+  ringCount = 0; ringHead = 0;
+  longCount = 0; longHead = 0;
+  memset(&acc, 0, sizeof(acc));
+  longInit();
+  server.send(200, "text/plain", "All stored history cleared.");
+}
+
 void webBegin() {
   if (!WEB_ENABLE) return;
   // Mount the flash filesystem (format it the first time) and restore any saved
   // history, so the live charts pick up where they left off after a reboot.
   fsReady = LittleFS.begin(true);
-  if (fsReady) loadLive();
+  if (fsReady) { loadLive(); longInit(); }
   else Serial.println(F("[web] LittleFS mount failed; history won't persist"));
   // Register the URLs. We actually start listening lazily in webLoop(),
   // once WiFi is connected.
   server.on("/", handleRoot);
   server.on("/data.json", handleData);
+  server.on("/longterm.json", handleLongterm);
+  server.on("/clear", handleClear);
   server.on("/metrics", handleMetrics);
 }
 
@@ -496,11 +752,21 @@ void webSample(const DavisData *data, float rssi, bool locked,
   strncpy(curReason, alertReason && alertReason[0] ? alertReason : "none", sizeof(curReason) - 1);
   curReason[sizeof(curReason) - 1] = '\0';
 
-  // Only add a point to the history graphs once per sample interval — and only
-  // when we're locked (real data) and the clock is set (real timestamp), so the
-  // charts don't fill with zeros while the radio is still searching.
+  // Record only when we're locked, the clock is set, AND we've actually heard a
+  // real temperature and humidity at least once. Right after lock, the station's
+  // first packet is wind only — temp/humidity arrive a few seconds later — so
+  // this stops a placeholder 0°F/0% from leaking into the stored stats.
+  bool haveData = locked && timeIsValid() &&
+                  data->lastTempUpdate != 0 && data->lastHumidityUpdate != 0;
+
+  // Feed the long-term (hourly) store on every good sample.
+  if (haveData) {
+    longTick((uint32_t)time(nullptr), data->tempF, dewF, s.hum, s.wind, s.gust, s.rain100);
+  }
+
+  // Only add a point to the live history graphs once per sample interval.
   uint32_t now = millis();
-  if (locked && timeIsValid() &&
+  if (haveData &&
       (lastSampleMs == 0 || (now - lastSampleMs) >= (uint32_t)WEB_SAMPLE_SECONDS * 1000UL)) {
     lastSampleMs = now;
     ring[ringHead] = s;
