@@ -181,6 +181,15 @@
 #define WEB_CALLSIGN  ""
 #define WEB_REPO_URL  "https://github.com/openincident/davisreport"
 
+// Time sync (NTP). The board has no clock of its own, so it learns the real
+// time from the internet. This gives the web charts real clock times and lets
+// stored history line up correctly across reboots.
+//   NTP_TZ is a POSIX timezone string. Arizona is "MST7" (Mountain Standard,
+//   and Arizona does NOT observe daylight saving). Some others:
+//     Pacific: "PST8PDT,M3.2.0,M11.1.0"   Eastern: "EST5EDT,M3.2.0,M11.1.0"
+#define NTP_SERVER  "pool.ntp.org"
+#define NTP_TZ      "MST7"
+
 // ---------------------------------------------------------------------------
 // 9. Optional tuning knobs (safe to leave at defaults)
 // ---------------------------------------------------------------------------

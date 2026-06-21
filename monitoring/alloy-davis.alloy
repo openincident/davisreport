@@ -1,0 +1,60 @@
+// ===========================================================================
+// Grafana Alloy config — scrape the Davis weather board's /metrics endpoint
+// and forward it to Grafana Cloud (or any Prometheus remote-write target).
+// ---------------------------------------------------------------------------
+// The board (firmware in this repo) serves Prometheus metrics at:
+//     http://<board-ip>/metrics      (also http://davis.local/metrics)
+//
+// Drop this into your Alloy config (e.g. /etc/alloy/config.alloy) — or merge the
+// scrape block into your existing config and reuse your existing remote_write.
+//
+// IMPORTANT: the board's DHCP address can change on reboot. Either set a DHCP
+// reservation for it (recommended) or use "davis.local:80" if the Alloy host
+// resolves mDNS (Linux: install avahi-daemon / nss-mdns).
+// ===========================================================================
+
+// --- Scrape the board ------------------------------------------------------
+prometheus.scrape "davis_weather" {
+  targets = [{
+    __address__ = "192.168.73.194:80",   // <-- set to your board's reserved IP (or "davis.local:80")
+    instance    = "davis",
+    job         = "davis_weather",
+  }]
+  metrics_path    = "/metrics"
+  scrape_interval = "30s"
+  forward_to      = [prometheus.remote_write.grafanacloud.receiver]
+}
+
+// --- Ship to Grafana Cloud -------------------------------------------------
+// You very likely already have a remote_write block — if so, point the scrape
+// above at it and delete this. Otherwise fill in your Grafana Cloud Prometheus
+// push URL and credentials (Grafana Cloud → Connections → Prometheus → details).
+prometheus.remote_write "grafanacloud" {
+  endpoint {
+    url = "https://prometheus-prod-XX-prod-REGION.grafana.net/api/prom/push"
+    basic_auth {
+      username = "YOUR_GRAFANA_CLOUD_PROM_USER_ID"
+      password = "YOUR_GRAFANA_CLOUD_API_TOKEN"
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Metrics exposed by the board (all prefixed davis_):
+//   davis_temperature_fahrenheit      gauge
+//   davis_dew_point_fahrenheit        gauge
+//   davis_humidity_percent            gauge
+//   davis_wind_speed_mph              gauge
+//   davis_wind_gust_mph               gauge
+//   davis_wind_direction_degrees      gauge
+//   davis_rain_total_inches           gauge   (resets on board reboot)
+//   davis_solar_wm2                   gauge
+//   davis_supercap_volts              gauge
+//   davis_signal_dbm                  gauge
+//   davis_radio_locked                gauge   (1 = receiving the station)
+//   davis_alert                       gauge   (1 = SkyWarn threshold tripped)
+//   davis_battery_low                 gauge
+//   davis_packets_good_total          counter
+//   davis_packets_bad_total           counter
+//   davis_uptime_seconds              counter
+// ---------------------------------------------------------------------------

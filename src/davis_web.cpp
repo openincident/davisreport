@@ -20,7 +20,9 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
+#include <time.h>
 #include "davis_web.h"
+#include "davis_radio.h"   // for radioBadCount() in /metrics
 #include "config.h"
 
 // Sensible fallbacks if an older config.h doesn't define these.
@@ -45,13 +47,22 @@
 #ifndef WEB_REPO_URL
 #define WEB_REPO_URL "https://github.com/openincident/davisreport"
 #endif
+#ifndef NTP_SERVER
+#define NTP_SERVER "pool.ntp.org"
+#endif
+#ifndef NTP_TZ
+#define NTP_TZ "MST7"
+#endif
+
+// True once the clock has been set from the internet (epoch is past 2023).
+static bool timeIsValid() { return time(nullptr) > 1700000000; }
 
 // ---------------------------------------------------------------------------
 // One stored history point. We pack the values into small types so the whole
 // history stays tiny in memory (~14 bytes each).
 // ---------------------------------------------------------------------------
 struct Sample {
-  uint32_t t;        // board uptime in seconds when this point was recorded
+  uint32_t t;        // real (epoch) time in seconds when this point was recorded
   int16_t  temp10;   // temperature in °F x 10  (e.g. 825 = 82.5 °F)
   int16_t  dew10;    // dew point in °F x 10
   uint8_t  hum;      // humidity %
@@ -72,6 +83,11 @@ static uint16_t curDir = 0;
 static bool     curLocked = false;
 static bool     curAlert = false;
 static char     curReason[20] = "none";
+// Extra current values, kept for the /metrics (Prometheus) endpoint.
+static uint16_t curSolar = 0;
+static uint16_t curSupercap100 = 0;   // supercap volts x 100
+static uint32_t curGood = 0;          // good-packet count
+static bool     curBattLow = false;
 
 static WebServer server(80);
 static bool serverStarted = false;
@@ -242,10 +258,9 @@ async function refresh() {
   document.getElementById('windSub').textContent =
     `wind from · ${c.wind} ${u.wind}` + (c.gust ? ` (gust ${c.gust})` : '');
   // Charts
-  const H = d.history;            // [t, temp, dew, hum, wind, gust, rain]
-  const now = d.uptime_s, wall = Date.now();
-  const labels = H.map(r => { const dt = new Date(wall - (now - r[0])*1000);
-    return dt.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); });
+  const H = d.history;            // [t, temp, dew, hum, wind, gust, rain]  (t = epoch seconds)
+  const labels = H.map(r => new Date(r[0]*1000)
+    .toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}));
   const col = i => H.map(r => r[i]);
   setData(charts.temp, labels, [col(1)]);                          // temperature: percentile
   setData(charts.dew,  labels, [col(2)]);                          // dew point: its own scale
@@ -337,12 +352,48 @@ static void handleData() {
 // Public functions.
 // ===========================================================================
 
+// ---------------------------------------------------------------------------
+// /metrics — Prometheus exposition format. A tool like Grafana Alloy scrapes
+// this every few seconds and ships it to Grafana Cloud (or any Prometheus), so
+// long-term history lives there with no work on the board's part. Each line is
+// "metric_name value"; HELP/TYPE lines describe them.
+// ---------------------------------------------------------------------------
+static void handleMetrics() {
+  char b[1700];
+  // We always export base imperial units (°F / mph / inches) with explicit
+  // names, so the meaning is unambiguous no matter the display setting.
+  snprintf(b, sizeof(b),
+    "# HELP davis_temperature_fahrenheit Outdoor temperature\n# TYPE davis_temperature_fahrenheit gauge\ndavis_temperature_fahrenheit %.1f\n"
+    "# HELP davis_dew_point_fahrenheit Dew point\n# TYPE davis_dew_point_fahrenheit gauge\ndavis_dew_point_fahrenheit %.1f\n"
+    "# HELP davis_humidity_percent Relative humidity\n# TYPE davis_humidity_percent gauge\ndavis_humidity_percent %u\n"
+    "# HELP davis_wind_speed_mph Wind speed\n# TYPE davis_wind_speed_mph gauge\ndavis_wind_speed_mph %u\n"
+    "# HELP davis_wind_gust_mph Wind gust\n# TYPE davis_wind_gust_mph gauge\ndavis_wind_gust_mph %u\n"
+    "# HELP davis_wind_direction_degrees Wind direction\n# TYPE davis_wind_direction_degrees gauge\ndavis_wind_direction_degrees %u\n"
+    "# HELP davis_rain_total_inches Rain since startup\n# TYPE davis_rain_total_inches gauge\ndavis_rain_total_inches %.2f\n"
+    "# HELP davis_solar_wm2 Solar radiation\n# TYPE davis_solar_wm2 gauge\ndavis_solar_wm2 %u\n"
+    "# HELP davis_supercap_volts ISS solar capacitor voltage\n# TYPE davis_supercap_volts gauge\ndavis_supercap_volts %.2f\n"
+    "# HELP davis_signal_dbm Radio signal strength\n# TYPE davis_signal_dbm gauge\ndavis_signal_dbm %d\n"
+    "# HELP davis_radio_locked Receiver locked onto the station (1/0)\n# TYPE davis_radio_locked gauge\ndavis_radio_locked %u\n"
+    "# HELP davis_alert Severe-weather alert active (1/0)\n# TYPE davis_alert gauge\ndavis_alert %u\n"
+    "# HELP davis_battery_low ISS battery low (1/0)\n# TYPE davis_battery_low gauge\ndavis_battery_low %u\n"
+    "# HELP davis_packets_good_total Valid packets received\n# TYPE davis_packets_good_total counter\ndavis_packets_good_total %lu\n"
+    "# HELP davis_packets_bad_total Failed-checksum receptions\n# TYPE davis_packets_bad_total counter\ndavis_packets_bad_total %lu\n"
+    "# HELP davis_uptime_seconds Seconds since boot\n# TYPE davis_uptime_seconds counter\ndavis_uptime_seconds %lu\n",
+    cur.temp10 / 10.0f, cur.dew10 / 10.0f, cur.hum, cur.wind, cur.gust, curDir,
+    cur.rain100 / 100.0f, curSolar, curSupercap100 / 100.0f, cur.rssi,
+    curLocked ? 1 : 0, curAlert ? 1 : 0, curBattLow ? 1 : 0,
+    (unsigned long)curGood, (unsigned long)radioBadCount(),
+    (unsigned long)(millis() / 1000UL));
+  server.send(200, "text/plain; version=0.0.4", b);
+}
+
 void webBegin() {
   if (!WEB_ENABLE) return;
-  // Register the two URLs. We actually start listening lazily in webLoop(),
+  // Register the URLs. We actually start listening lazily in webLoop(),
   // once WiFi is connected.
   server.on("/", handleRoot);
   server.on("/data.json", handleData);
+  server.on("/metrics", handleMetrics);
 }
 
 void webLoop() {
@@ -356,6 +407,8 @@ void webLoop() {
 
   if (!serverStarted) {
     server.begin();
+    // Ask the internet for the current time (the board has no clock of its own).
+    configTzTime(NTP_TZ, NTP_SERVER);
     // Publish the friendly "davis.local" name and advertise the web service.
     if (MDNS.begin(WEB_HOSTNAME)) {
       MDNS.addService("http", "tcp", 80);
@@ -378,26 +431,34 @@ void webSample(const DavisData *data, float rssi, bool locked,
   // Build a fresh snapshot of the current values.
   float dewF = davisDewPointF(data->tempF, data->humidityPct);
   Sample s;
-  s.t       = millis() / 1000UL;
+  s.t       = (uint32_t)time(nullptr);   // real (epoch) time
   s.temp10  = (int16_t)lroundf(data->tempF * 10.0f);
   s.dew10   = (int16_t)lroundf(dewF * 10.0f);
   s.hum     = (uint8_t)lroundf(data->humidityPct);
   s.wind    = (uint8_t)lroundf(data->windSpeedMph);
   s.gust    = (uint8_t)lroundf(data->windGustMph);
   s.rain100 = (uint16_t)lroundf(data->rainClicksTotal * 0.01f * 100.0f);
-  s.rssi    = (int8_t)rssi;
+  // Clamp into int8 range so the pre-lock "-999" sentinel doesn't wrap to a
+  // bogus positive number; it shows as -128 ("no signal") instead.
+  s.rssi    = (int8_t)constrain((int)lroundf(rssi), -128, 127);
 
   // Keep the header values fresh on every call.
   cur = s;
   curDir = data->windDirDegrees;
   curLocked = locked;
   curAlert = alert;
+  curSolar = data->solarWm2;
+  curSupercap100 = (uint16_t)lroundf(data->superCapVolts * 100.0f);
+  curGood = data->goodPacketCount;
+  curBattLow = data->batteryLow;
   strncpy(curReason, alertReason && alertReason[0] ? alertReason : "none", sizeof(curReason) - 1);
   curReason[sizeof(curReason) - 1] = '\0';
 
-  // Only add a point to the history graphs once per sample interval.
+  // Only add a point to the history graphs once per sample interval — and only
+  // once the clock is set, so every stored point has a real timestamp.
   uint32_t now = millis();
-  if (lastSampleMs == 0 || (now - lastSampleMs) >= (uint32_t)WEB_SAMPLE_SECONDS * 1000UL) {
+  if (timeIsValid() &&
+      (lastSampleMs == 0 || (now - lastSampleMs) >= (uint32_t)WEB_SAMPLE_SECONDS * 1000UL)) {
     lastSampleMs = now;
     ring[ringHead] = s;
     ringHead = (uint16_t)((ringHead + 1) % WEB_HISTORY_POINTS);
