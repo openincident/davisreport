@@ -159,7 +159,24 @@
 #define PIN_ALERT_LED     25
 
 // ---------------------------------------------------------------------------
-// 8. Optional tuning knobs (safe to leave at defaults)
+// 8. Onboard web dashboard (the board serves its own chart page)
+// ---------------------------------------------------------------------------
+// When this is on, the board runs a tiny website you can open in any browser on
+// your network. It shows the current conditions and graphs of the weather since
+// the board last started up. The history lives in the board's memory, so it
+// resets when the board reboots and only goes back as far as the settings below.
+
+#define WEB_ENABLE     1            // 1 = run the web dashboard, 0 = off
+#define WEB_HOSTNAME   "davis"      // reach it at http://davis.local (and the IP)
+
+// How often to record a point for the history graphs, and how many points to
+// keep. 120 seconds x 720 points = the last 24 hours. More/longer points use
+// more memory (each point is tiny — ~14 bytes).
+#define WEB_SAMPLE_SECONDS  120
+#define WEB_HISTORY_POINTS  720
+
+// ---------------------------------------------------------------------------
+// 9. Optional tuning knobs (safe to leave at defaults)
 // ---------------------------------------------------------------------------
 // How often (in seconds) to re-send EVERY reading to Home Assistant even if the
 // value hasn't changed. This keeps Home Assistant from marking sensors as

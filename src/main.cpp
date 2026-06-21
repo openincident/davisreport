@@ -23,6 +23,7 @@
 #include "davis_display.h"
 #include "davis_mqtt.h"
 #include "davis_alarm.h"
+#include "davis_web.h"
 
 // Our single, shared record of the latest weather readings. Every part of the
 // program reads from or writes to this one structure.
@@ -85,6 +86,9 @@ void setup() {
   Serial.println(F("[setup] 4/4 starting wifi/mqtt")); Serial.flush();
   mqttBegin();
 
+  // Get the onboard web dashboard ready (it starts serving once WiFi connects).
+  webBegin();
+
   Serial.println(F("Startup complete. Listening for the Davis station..."));
 }
 
@@ -92,8 +96,10 @@ void setup() {
 // loop(): runs continuously.
 // ---------------------------------------------------------------------------
 void loop() {
-  // 1. Keep the WiFi + MQTT connection healthy (reconnects if it dropped).
+  // 1. Keep the WiFi + MQTT connection healthy (reconnects if it dropped), and
+  //    answer any web-dashboard requests.
   mqttLoop();
+  webLoop();
 
   // 2. Ask the radio whether a new weather message has arrived. This also keeps
   //    the frequency-hopping in sync, so we call it as often as possible.
@@ -125,6 +131,10 @@ void loop() {
     // Re-send readings periodically even with no new packet, so Home Assistant
     // never marks the sensors stale. (mqttPublish decides if it's time.)
     mqttPublish(&weather, radioGetRssi(), radioIsLocked());
+    // Keep the web dashboard's current values fresh (it records a history point
+    // only every WEB_SAMPLE_SECONDS on its own).
+    webSample(&weather, radioGetRssi(), radioIsLocked(),
+              alarmActive(), alarmReason());
   }
 
   // 5. Every few seconds, print a one-line status summary to the serial log.
