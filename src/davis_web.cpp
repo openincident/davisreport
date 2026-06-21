@@ -120,6 +120,8 @@ static const char PAGE_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
   footer { color:var(--muted); font-size:12px; text-align:center; padding:18px; }
   a { color:var(--accent); text-decoration:none; }
   a:hover { text-decoration:underline; }
+  #needle { transition:transform .6s ease; }
+  #compass text { font-family:system-ui,sans-serif; }
 </style>
 </head>
 <body>
@@ -131,6 +133,28 @@ static const char PAGE_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
 </header>
 <div class="wrap">
   <div class="cards" id="cards"></div>
+  <div class="chartcard">
+    <h3>Wind Direction</h3>
+    <div style="display:flex;align-items:center;gap:28px;justify-content:center;flex-wrap:wrap">
+      <svg id="compass" width="180" height="180" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="88" fill="#141a24" stroke="#2a3445" stroke-width="2"/>
+        <g id="ticks" stroke="#3a465a" stroke-width="2"></g>
+        <text x="100" y="27" text-anchor="middle" fill="#ff5252" font-size="16" font-weight="700">N</text>
+        <text x="185" y="106" text-anchor="middle" fill="#8b98a9" font-size="14">E</text>
+        <text x="100" y="191" text-anchor="middle" fill="#8b98a9" font-size="14">S</text>
+        <text x="15" y="106" text-anchor="middle" fill="#8b98a9" font-size="14">W</text>
+        <g id="needle" transform="rotate(0 100 100)">
+          <polygon points="100,32 93,104 107,104" fill="#ff5252"/>
+          <polygon points="100,168 93,96 107,96" fill="#56627a"/>
+          <circle cx="100" cy="100" r="7" fill="#e6edf3"/>
+        </g>
+      </svg>
+      <div style="text-align:center">
+        <div class="val" id="windText" style="font-size:34px">—</div>
+        <div class="label" id="windSub">wind from</div>
+      </div>
+    </div>
+  </div>
   <div class="chartcard"><h3>Temperature &amp; Dew Point</h3><canvas id="cTemp" height="120"></canvas></div>
   <div class="chartcard"><h3>Humidity</h3><canvas id="cHum" height="100"></canvas></div>
   <div class="chartcard"><h3>Wind &amp; Gust</h3><canvas id="cWind" height="100"></canvas></div>
@@ -152,7 +176,21 @@ function mkChart(id, series, opts={}) {
       plugins:{ legend:{ labels:{ color:'#e6edf3' } } } }
   });
 }
+function buildCompass() {
+  // Draw the tick marks around the compass face (long ones at N/E/S/W).
+  const ticks = document.getElementById('ticks');
+  for (let a = 0; a < 360; a += 30) {
+    const r1 = (a % 90 === 0) ? 72 : 80, rad = a * Math.PI / 180;
+    const ln = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    ln.setAttribute('x1', (100 + r1*Math.sin(rad)).toFixed(1));
+    ln.setAttribute('y1', (100 - r1*Math.cos(rad)).toFixed(1));
+    ln.setAttribute('x2', (100 + 88*Math.sin(rad)).toFixed(1));
+    ln.setAttribute('y2', (100 - 88*Math.cos(rad)).toFixed(1));
+    ticks.appendChild(ln);
+  }
+}
 function init() {
+  buildCompass();
   charts.temp = mkChart('cTemp', [
     {label:'Temp', color:'#ff8a5b'}, {label:'Dew Point', color:'#4cc2ff'} ]);
   charts.hum  = mkChart('cHum',  [{label:'Humidity %', color:'#7ee787', area:true, fill:'rgba(126,231,135,.12)'}], {y:{min:0,max:100}});
@@ -196,6 +234,12 @@ async function refresh() {
        <span class="arrow" style="transform:rotate(${c.dir}deg)">↑</span></small></div></div>` +
     card('Gust', c.gust, u.wind) +
     card('Rain', c.rain.toFixed(2), u.rain);
+  // Wind compass: rotate the needle so its red tip points to where the wind is
+  // coming FROM (like a weather vane). 0° = N at the top, turning clockwise.
+  document.getElementById('needle').setAttribute('transform', `rotate(${c.dir} 100 100)`);
+  document.getElementById('windText').textContent = `${c.dir}° ${compass(c.dir)}`;
+  document.getElementById('windSub').textContent =
+    `wind from · ${c.wind} ${u.wind}` + (c.gust ? ` (gust ${c.gust})` : '');
   // Charts
   const H = d.history;            // [t, temp, dew, hum, wind, gust, rain]
   const now = d.uptime_s, wall = Date.now();
