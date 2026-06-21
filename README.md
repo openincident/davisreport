@@ -13,6 +13,8 @@ You do **not** need to touch your existing Davis console — this is a completel
 - 📡 **Direct over-the-air reception** of your Davis outdoor sensors (no cables to the console, no cloud, no subscription).
 - 🖥️ **Live readings on the board's OLED screen** — current temperature, wind, humidity, and a signal/health indicator.
 - 🏠 **Automatic Home Assistant integration** — sensors appear by themselves (via "MQTT discovery"), grouped under one device. No YAML editing required on the Home Assistant side.
+- ⛅ **Calculated dew point** and a **configurable SkyWarn-style severe-weather alert** (flashes the screen + blue LED and sets a Home Assistant boolean).
+- 🌐 **Its own web dashboard** at `http://davis.local` — live + long-term charts (up to 180 days), a wind compass, and a Prometheus `/metrics` endpoint for Grafana/Alloy. See [docs/06-web-dashboard.md](docs/06-web-dashboard.md).
 
 ```
    Your Davis outdoor sensors            LilyGO T3 board                 Home Assistant
@@ -44,6 +46,7 @@ The full walkthrough lives in the `docs/` folder. In order:
 3. **[docs/03-how-it-works.md](docs/03-how-it-works.md)** — the weather-radio protocol explained in plain English (optional, but interesting).
 4. **[docs/04-home-assistant.md](docs/04-home-assistant.md)** — getting the sensors to show up in Home Assistant, plus an example dashboard.
 5. **[docs/05-troubleshooting.md](docs/05-troubleshooting.md)** — what to do when it isn't hearing anything.
+6. **[docs/06-web-dashboard.md](docs/06-web-dashboard.md)** — the onboard web page, stored history, and the Prometheus/Grafana metrics feed.
 
 ### The 60-second version
 
