@@ -175,6 +175,12 @@
 #define WEB_SAMPLE_SECONDS  120
 #define WEB_HISTORY_POINTS  720
 
+// Your name / callsign / project link, shown as a tagline at the top and bottom
+// of the web page. Leave the callsign as "" if you don't have one.
+#define WEB_OWNER     "Your Name"
+#define WEB_CALLSIGN  ""
+#define WEB_REPO_URL  "https://github.com/openincident/davisreport"
+
 // ---------------------------------------------------------------------------
 // 9. Optional tuning knobs (safe to leave at defaults)
 // ---------------------------------------------------------------------------

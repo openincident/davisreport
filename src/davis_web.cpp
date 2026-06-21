@@ -36,6 +36,15 @@
 #ifndef WEB_HISTORY_POINTS
 #define WEB_HISTORY_POINTS 720
 #endif
+#ifndef WEB_OWNER
+#define WEB_OWNER ""
+#endif
+#ifndef WEB_CALLSIGN
+#define WEB_CALLSIGN ""
+#endif
+#ifndef WEB_REPO_URL
+#define WEB_REPO_URL "https://github.com/openincident/davisreport"
+#endif
 
 // ---------------------------------------------------------------------------
 // One stored history point. We pack the values into small types so the whole
@@ -109,6 +118,8 @@ static const char PAGE_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
   .chartcard h3 { margin:2px 0 8px; font-size:14px; color:var(--muted); font-weight:600; }
   canvas { width:100% !important; }
   footer { color:var(--muted); font-size:12px; text-align:center; padding:18px; }
+  a { color:var(--accent); text-decoration:none; }
+  a:hover { text-decoration:underline; }
 </style>
 </head>
 <body>
@@ -116,6 +127,7 @@ static const char PAGE_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
 <header>
   <h1>🌤️ Davis Weather</h1>
   <span class="sub" id="status">connecting…</span>
+  <span class="sub" id="tagtop" style="margin-left:auto"></span>
 </header>
 <div class="wrap">
   <div class="cards" id="cards"></div>
@@ -123,7 +135,7 @@ static const char PAGE_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
   <div class="chartcard"><h3>Humidity</h3><canvas id="cHum" height="100"></canvas></div>
   <div class="chartcard"><h3>Wind &amp; Gust</h3><canvas id="cWind" height="100"></canvas></div>
   <div class="chartcard"><h3>Rain (since startup)</h3><canvas id="cRain" height="100"></canvas></div>
-  <footer>Served by the LilyGO board · history resets when the board reboots</footer>
+  <footer id="foot">Served by the LilyGO board · history resets when the board reboots</footer>
 </div>
 <script>
 const charts = {};
@@ -167,6 +179,14 @@ async function refresh() {
   const up = d.uptime_s; const h=Math.floor(up/3600), m=Math.floor(up%3600/60);
   document.getElementById('status').textContent =
     `${d.host}.local · ${c.locked?'receiving':'searching'} · ${c.rssi} dBm · up ${h}h ${m}m`;
+  // Owner / callsign / repo tagline, top and bottom.
+  const tag = [d.owner, d.callsign].filter(Boolean).join(' · ');
+  document.getElementById('tagtop').textContent = tag;
+  const repoShort = (d.repo||'').replace(/^https?:\/\//,'');
+  document.getElementById('foot').innerHTML =
+    (tag ? tag+' · ' : '') +
+    (d.repo ? `<a href="${d.repo}" target="_blank" rel="noopener">${repoShort}</a> · ` : '') +
+    'history resets when the board reboots';
   // Current cards
   document.getElementById('cards').innerHTML =
     card('Temperature', c.temp.toFixed(1), u.temp) +
@@ -213,14 +233,19 @@ static void handleData() {
   const char *wUnit = USE_IMPERIAL_UNITS ? "mph" : "km/h";
   const char *rUnit = USE_IMPERIAL_UNITS ? "in" : "mm";
 
-  // Header + current conditions.
+  // Identity (name/callsign/repo) + units. Sent as its own chunk so we don't
+  // crowd the buffer.
   snprintf(buf, sizeof(buf),
-    "{\"host\":\"%s\",\"uptime_s\":%lu,"
-    "\"units\":{\"temp\":\"%s\",\"wind\":\"%s\",\"rain\":\"%s\"},"
+    "{\"host\":\"%s\",\"owner\":\"%s\",\"callsign\":\"%s\",\"repo\":\"%s\",\"uptime_s\":%lu,"
+    "\"units\":{\"temp\":\"%s\",\"wind\":\"%s\",\"rain\":\"%s\"},",
+    WEB_HOSTNAME, WEB_OWNER, WEB_CALLSIGN, WEB_REPO_URL,
+    (unsigned long)(millis() / 1000UL), tUnit, wUnit, rUnit);
+  server.sendContent(buf);
+
+  // Current conditions.
+  snprintf(buf, sizeof(buf),
     "\"current\":{\"temp\":%.1f,\"dew\":%.1f,\"hum\":%u,\"wind\":%u,\"gust\":%u,"
     "\"dir\":%u,\"rain\":%.2f,\"rssi\":%d,\"locked\":%u,\"alert\":%u,\"alert_reason\":\"%s\"},",
-    WEB_HOSTNAME, (unsigned long)(millis() / 1000UL),
-    tUnit, wUnit, rUnit,
     outTemp(cur.temp10 / 10.0f), outTemp(cur.dew10 / 10.0f), cur.hum,
     (unsigned)outWind(cur.wind), (unsigned)outWind(cur.gust),
     curDir, outRain(cur.rain100 / 100.0f), cur.rssi,
