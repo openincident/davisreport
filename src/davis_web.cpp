@@ -246,13 +246,31 @@ async function refresh() {
   const labels = H.map(r => { const dt = new Date(wall - (now - r[0])*1000);
     return dt.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); });
   const col = i => H.map(r => r[i]);
-  setData(charts.temp, labels, [col(1), col(2)]);
-  setData(charts.hum,  labels, [col(3)]);
-  setData(charts.wind, labels, [col(4), col(5)]);
-  setData(charts.rain, labels, [col(6)]);
+  setData(charts.temp, labels, [col(1), col(2)]);                  // temp & dew: percentile
+  setData(charts.hum,  labels, [col(3)], {floor:0, ceil:100});     // humidity: 0..100 cap
+  setData(charts.wind, labels, [col(4), col(5)], {floor:0});       // wind & gust: never below 0
+  setData(charts.rain, labels, [col(6)], {lo:0, hi:1, floor:0});   // rain: full range from 0
 }
-function setData(ch, labels, cols){ ch.data.labels=labels;
-  cols.forEach((c,i)=>ch.data.datasets[i].data=c); ch.update(); }
+// Pick a y-axis range from the data's 5th-95th percentiles (plus 10% padding)
+// so each chart zooms into the meaningful variation and a single spike or
+// dropout doesn't squash everything flat. `o` may set lo/hi percentiles and a
+// floor/ceil (e.g. humidity can't drop below 0 or rise above 100).
+function pctile(sorted, p){ const i=(sorted.length-1)*p, lo=Math.floor(i), hi=Math.ceil(i);
+  return sorted[lo] + (sorted[hi]-sorted[lo])*(i-lo); }
+function autoRange(ch, o){ o=o||{};
+  const vals=ch.data.datasets.flatMap(d=>d.data).filter(v=>v!=null&&!isNaN(v)).sort((a,b)=>a-b);
+  const y=ch.options.scales.y;
+  if(vals.length<2){ y.min=undefined; y.max=undefined; return; }
+  let lo=pctile(vals, o.lo!=null?o.lo:0.05), hi=pctile(vals, o.hi!=null?o.hi:0.95);
+  if(hi-lo < 1e-6){ lo-=1; hi+=1; }              // flat data: give it some height
+  const pad=(hi-lo)*0.1;
+  let min=lo-pad, max=hi+pad;
+  if(o.floor!=null) min=Math.max(o.floor, min);
+  if(o.ceil!=null)  max=Math.min(o.ceil, max);
+  y.min=Math.round(min*10)/10; y.max=Math.round(max*10)/10;
+}
+function setData(ch, labels, cols, range){ ch.data.labels=labels;
+  cols.forEach((c,i)=>ch.data.datasets[i].data=c); autoRange(ch, range); ch.update(); }
 init();
 </script>
 </body>
