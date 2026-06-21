@@ -158,6 +158,11 @@
 #define ALARM_LED_ENABLE  1
 #define PIN_ALERT_LED     25
 
+// Also blink that same LED briefly each time a weather packet is received — a
+// "heartbeat" that shows reception is healthy. An active alert takes priority
+// over this. Set 0 to disable.
+#define LED_BLINK_ON_PACKET  1
+
 // ---------------------------------------------------------------------------
 // 8. Onboard web dashboard (the board serves its own chart page)
 // ---------------------------------------------------------------------------

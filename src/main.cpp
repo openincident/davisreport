@@ -36,6 +36,10 @@ static uint8_t packet[DAVIS_PACKET_LENGTH];
 // times per second (which would waste effort and flicker).
 static uint32_t lastDisplayMs = 0;
 
+// When a packet arrives we light the LED until this time (a brief blink).
+static uint32_t ledPulseUntilMs = 0;
+#define LED_PULSE_MS 40   // how long each packet "heartbeat" blink lasts
+
 // Remember when we last printed the serial status summary (see loop()).
 static uint32_t lastStatusMs = 0;
 
@@ -59,9 +63,10 @@ void setup() {
   // Start with a clean, empty set of readings.
   davisInit(&weather);
 
-  // Get the alert logic ready, and set up the alert LED pin (off to start).
+  // Get the alert logic ready, and set up the LED pin (off to start). The LED is
+  // used both for the severe-weather alert and for the per-packet heartbeat.
   alarmInit();
-  if (ALARM_LED_ENABLE) {
+  if (ALARM_LED_ENABLE || LED_BLINK_ON_PACKET) {
     pinMode(PIN_ALERT_LED, OUTPUT);
     digitalWrite(PIN_ALERT_LED, LOW);
   }
@@ -109,6 +114,7 @@ void loop() {
     davisDecode(packet, &weather);     // pull the weather values out of it
     weather.goodPacketCount++;
     mqttPublish(&weather, radioGetRssi(), radioIsLocked());  // send to Home Assistant
+    ledPulseUntilMs = millis() + LED_PULSE_MS;   // brief LED "heartbeat" blink
   }
 
   uint32_t now = millis();
@@ -116,9 +122,16 @@ void loop() {
   // 3. Re-check the severe-weather thresholds (this also keeps the rolling
   //    30-minute rain total current), and blink the alert LED if we're alarmed.
   alarmUpdate(&weather);
-  if (ALARM_LED_ENABLE) {
-    // When alarmed, flash the LED about 3 times a second; otherwise keep it off.
-    digitalWrite(PIN_ALERT_LED, alarmActive() ? ((now / 150) % 2) : LOW);
+  if (ALARM_LED_ENABLE || LED_BLINK_ON_PACKET) {
+    bool ledOn;
+    if (ALARM_LED_ENABLE && alarmActive()) {
+      ledOn = (now / 150) % 2;          // alert: ~3 Hz flash (takes priority)
+    } else if (LED_BLINK_ON_PACKET) {
+      ledOn = (now < ledPulseUntilMs);  // brief blink for each received packet
+    } else {
+      ledOn = false;
+    }
+    digitalWrite(PIN_ALERT_LED, ledOn ? HIGH : LOW);
   }
 
   // 4. Refresh the on-screen display about twice a second. We also use this
