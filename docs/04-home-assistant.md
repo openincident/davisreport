@@ -56,6 +56,21 @@ To use it:
 
 That gives you a tidy weather panel with all the readings in one place.
 
+### Fancier charts (optional)
+
+For smooth, gradient line charts with weeks/months of history, there's a second
+file: **[../homeassistant/dashboard-apexcharts.yaml](../homeassistant/dashboard-apexcharts.yaml)**.
+It uses the **ApexCharts** custom card, which you install once through HACS
+(search "ApexCharts Card" → Download → hard-refresh your browser). The charts
+read from Home Assistant's long-term statistics, so they fill out to days and
+weeks as your station keeps running. The plain `dashboard.yaml` above needs no
+add-ons if you'd rather keep it simple.
+
+> **Tip:** the board *also* serves its own little chart page on your network at
+> `http://davis.local` (see the `WEB_*` settings in `config.h`). That one shows
+> history since the board last started up; Home Assistant is the place for
+> long-term history that survives reboots.
+
 ## How the readings flow (for reference)
 
 ```

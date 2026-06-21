@@ -1,0 +1,162 @@
+# ===========================================================================
+# Fancier Home Assistant dashboard for the Davis weather station — ApexCharts.
+# ---------------------------------------------------------------------------
+# This is the "looks upgrade" version of dashboard.yaml. The graphs use the
+# ApexCharts custom card (smooth gradient area charts, long history from
+# Home Assistant's long-term statistics). The gauges, alert banner, and
+# diagnostics stay as built-in cards.
+#
+# REQUIREMENTS:
+#   1. Install the "ApexCharts Card" through HACS (Home Assistant Community
+#      Store): HACS -> search "ApexCharts Card" -> Download -> hard-refresh.
+#      (The plain dashboard.yaml needs no add-ons if you'd rather skip this.)
+#
+# ENTITY NAMES:
+#   These assume the device is named "Davis Weather Station", giving entities
+#   like sensor.davis_weather_station_temperature. Home Assistant prefixes
+#   entities with the device name, so if your device shows up differently
+#   (e.g. "N7NMD Davis Weather Station" -> sensor.n7nmd_davis_weather_station_*),
+#   find-and-replace the entity ids below to match Settings -> Devices.
+#
+# HOW TO USE:
+#   Add a new dashboard (Settings -> Dashboards -> Add Dashboard -> "Edit in
+#   YAML"), or a Manual card, and paste this in.
+# ===========================================================================
+
+title: Davis Weather
+views:
+  - title: Weather
+    path: weather
+    icon: mdi:weather-partly-rainy
+    cards:
+      # --- Severe-weather alert banner (only shows while an alert is active) ---
+      - type: conditional
+        conditions:
+          - entity: binary_sensor.davis_weather_station_weather_alert
+            state: "on"
+        card:
+          type: markdown
+          content: >
+            # ⚠️ WEATHER ALERT —
+            {{ states('sensor.davis_weather_station_alert_reason') }}
+
+            A reading has crossed your SkyWarn reporting threshold.
+
+      # --- At-a-glance gauges ---
+      - type: horizontal-stack
+        cards:
+          - type: gauge
+            name: Temp
+            entity: sensor.davis_weather_station_temperature
+            needle: true
+            min: 20
+            max: 120          # adjust to your climate (°F)
+            severity: { green: 40, yellow: 95, red: 105 }
+          - type: gauge
+            name: Humidity
+            entity: sensor.davis_weather_station_humidity
+            min: 0
+            max: 100
+          - type: gauge
+            name: Wind
+            entity: sensor.davis_weather_station_wind_speed
+            needle: true
+            min: 0
+            max: 40           # mph
+
+      # --- Current conditions at a glance ---
+      - type: glance
+        title: Now
+        columns: 4
+        entities:
+          - { entity: sensor.davis_weather_station_temperature, name: Temp }
+          - { entity: sensor.davis_weather_station_dew_point, name: Dew Pt }
+          - { entity: sensor.davis_weather_station_humidity, name: Humidity }
+          - { entity: sensor.davis_weather_station_wind_speed, name: Wind }
+          - { entity: sensor.davis_weather_station_wind_gust, name: Gust }
+          - { entity: sensor.davis_weather_station_wind_direction, name: Dir }
+          - { entity: sensor.davis_weather_station_rain_rate, name: Rain Rate }
+          - { entity: sensor.davis_weather_station_rain_total, name: Rain Total }
+
+      # --- Temperature & dew point, 30 days (hourly statistics) ---
+      - type: custom:apexcharts-card
+        graph_span: 30d
+        header: { show: true, title: Temperature & Dew Point — 30 days, show_states: true, colorize_states: true }
+        apex_config:
+          chart: { height: 260 }
+          stroke: { curve: smooth, width: 2 }
+          fill: { type: gradient, gradient: { opacityFrom: 0.45, opacityTo: 0.05 } }
+          grid: { borderColor: "#232c3b" }
+        series:
+          - entity: sensor.davis_weather_station_temperature
+            name: Temp
+            type: area
+            color: "#ff8a5b"
+            statistics: { type: mean, period: hour }
+          - entity: sensor.davis_weather_station_dew_point
+            name: Dew Point
+            type: area
+            color: "#4cc2ff"
+            statistics: { type: mean, period: hour }
+
+      # --- Humidity, 14 days ---
+      - type: custom:apexcharts-card
+        graph_span: 14d
+        yaxis: [{ min: 0 }]
+        header: { show: true, title: Humidity — 14 days, show_states: true, colorize_states: true }
+        apex_config:
+          chart: { height: 200 }
+          stroke: { curve: smooth, width: 2 }
+          fill: { type: gradient, gradient: { opacityFrom: 0.45, opacityTo: 0.05 } }
+        series:
+          - entity: sensor.davis_weather_station_humidity
+            name: Humidity
+            type: area
+            color: "#7ee787"
+            statistics: { type: mean, period: hour }
+
+      # --- Wind (mean) & gust (max), 7 days ---
+      - type: custom:apexcharts-card
+        graph_span: 7d
+        yaxis: [{ min: 0 }]
+        header: { show: true, title: Wind & Gust — 7 days, show_states: true, colorize_states: true }
+        apex_config:
+          chart: { height: 200 }
+          stroke: { curve: smooth, width: 2 }
+        series:
+          - entity: sensor.davis_weather_station_wind_speed
+            name: Wind
+            type: line
+            color: "#a5a5ff"
+            statistics: { type: mean, period: hour }
+          - entity: sensor.davis_weather_station_wind_gust
+            name: Gust
+            type: line
+            color: "#ff5252"
+            statistics: { type: max, period: hour }
+
+      # --- Rain rate (peak per hour), 7 days ---
+      - type: custom:apexcharts-card
+        graph_span: 7d
+        yaxis: [{ min: 0 }]
+        header: { show: true, title: Rain rate — 7 days, show_states: true, colorize_states: true }
+        apex_config:
+          chart: { height: 200 }
+          fill: { type: gradient, gradient: { opacityFrom: 0.45, opacityTo: 0.05 } }
+        series:
+          - entity: sensor.davis_weather_station_rain_rate
+            name: Rain rate
+            type: area
+            color: "#4cc2ff"
+            statistics: { type: max, period: hour }
+
+      # --- Status & diagnostics ---
+      - type: entities
+        title: Status & Diagnostics
+        entities:
+          - { entity: binary_sensor.davis_weather_station_weather_alert, name: Weather Alert }
+          - { entity: sensor.davis_weather_station_alert_reason, name: Alert Reason }
+          - { entity: sensor.davis_weather_station_signal_strength, name: Signal }
+          - { entity: sensor.davis_weather_station_supercap_voltage, name: Supercap }
+          - { entity: binary_sensor.davis_weather_station_battery_low, name: Battery Low }
+          - { entity: sensor.davis_weather_station_solar_radiation, name: Solar }
