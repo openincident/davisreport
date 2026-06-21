@@ -20,6 +20,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
+#include <LittleFS.h>
 #include <time.h>
 #include "davis_web.h"
 #include "davis_radio.h"   // for radioBadCount() in /metrics
@@ -76,6 +77,42 @@ static Sample   ring[WEB_HISTORY_POINTS];   // the rolling history
 static uint16_t ringCount = 0;              // how many points we have so far
 static uint16_t ringHead  = 0;              // where the next point will be written
 static uint32_t lastSampleMs = 0;           // when we last recorded a history point
+
+// --- Persistence: the live ring is saved to flash so it survives a reboot. ---
+static bool     fsReady = false;            // did the flash filesystem mount?
+static uint32_t lastSnapshotMs = 0;         // when we last wrote the ring to flash
+#define WEB_SNAPSHOT_SECONDS 600            // save the live ring every 10 minutes
+#define LIVE_FILE  "/live.dat"
+#define LIVE_MAGIC 0x44415631               // "DAV1" — sanity tag at the file start
+
+// Write the whole ring (plus its head/count) to flash.
+static void saveLive() {
+  if (!fsReady) return;
+  File f = LittleFS.open(LIVE_FILE, "w");
+  if (!f) return;
+  uint32_t magic = LIVE_MAGIC;
+  f.write((const uint8_t *)&magic, 4);
+  f.write((const uint8_t *)&ringCount, 2);
+  f.write((const uint8_t *)&ringHead, 2);
+  f.write((const uint8_t *)ring, sizeof(ring));
+  f.close();
+}
+
+// Restore the ring from flash at startup (if a valid file is there).
+static void loadLive() {
+  if (!fsReady) return;
+  File f = LittleFS.open(LIVE_FILE, "r");
+  if (!f) return;
+  uint32_t magic = 0; uint16_t cnt = 0, head = 0;
+  bool ok = f.read((uint8_t *)&magic, 4) == 4 && magic == LIVE_MAGIC &&
+            f.read((uint8_t *)&cnt, 2) == 2 && f.read((uint8_t *)&head, 2) == 2 &&
+            f.read((uint8_t *)ring, sizeof(ring)) == sizeof(ring);
+  f.close();
+  if (ok && cnt <= WEB_HISTORY_POINTS && head < WEB_HISTORY_POINTS) {
+    ringCount = cnt; ringHead = head;
+    Serial.printf("[web] restored %u history points from flash\n", ringCount);
+  }
+}
 
 // The most recent values (kept fresh every call, for the page header).
 static Sample   cur;
@@ -389,6 +426,11 @@ static void handleMetrics() {
 
 void webBegin() {
   if (!WEB_ENABLE) return;
+  // Mount the flash filesystem (format it the first time) and restore any saved
+  // history, so the live charts pick up where they left off after a reboot.
+  fsReady = LittleFS.begin(true);
+  if (fsReady) loadLive();
+  else Serial.println(F("[web] LittleFS mount failed; history won't persist"));
   // Register the URLs. We actually start listening lazily in webLoop(),
   // once WiFi is connected.
   server.on("/", handleRoot);
@@ -455,13 +497,20 @@ void webSample(const DavisData *data, float rssi, bool locked,
   curReason[sizeof(curReason) - 1] = '\0';
 
   // Only add a point to the history graphs once per sample interval — and only
-  // once the clock is set, so every stored point has a real timestamp.
+  // when we're locked (real data) and the clock is set (real timestamp), so the
+  // charts don't fill with zeros while the radio is still searching.
   uint32_t now = millis();
-  if (timeIsValid() &&
+  if (locked && timeIsValid() &&
       (lastSampleMs == 0 || (now - lastSampleMs) >= (uint32_t)WEB_SAMPLE_SECONDS * 1000UL)) {
     lastSampleMs = now;
     ring[ringHead] = s;
     ringHead = (uint16_t)((ringHead + 1) % WEB_HISTORY_POINTS);
     if (ringCount < WEB_HISTORY_POINTS) ringCount++;
+  }
+
+  // Save the ring to flash every so often so a reboot doesn't lose it.
+  if (ringCount > 0 && (now - lastSnapshotMs) >= (uint32_t)WEB_SNAPSHOT_SECONDS * 1000UL) {
+    lastSnapshotMs = now;
+    saveLive();
   }
 }
