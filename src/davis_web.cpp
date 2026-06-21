@@ -155,7 +155,8 @@ static const char PAGE_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
       </div>
     </div>
   </div>
-  <div class="chartcard"><h3>Temperature &amp; Dew Point</h3><canvas id="cTemp" height="120"></canvas></div>
+  <div class="chartcard"><h3>Temperature</h3><canvas id="cTemp" height="110"></canvas></div>
+  <div class="chartcard"><h3>Dew Point</h3><canvas id="cDew" height="100"></canvas></div>
   <div class="chartcard"><h3>Humidity</h3><canvas id="cHum" height="100"></canvas></div>
   <div class="chartcard"><h3>Wind &amp; Gust</h3><canvas id="cWind" height="100"></canvas></div>
   <div class="chartcard"><h3>Rain (since startup)</h3><canvas id="cRain" height="100"></canvas></div>
@@ -191,8 +192,8 @@ function buildCompass() {
 }
 function init() {
   buildCompass();
-  charts.temp = mkChart('cTemp', [
-    {label:'Temp', color:'#ff8a5b'}, {label:'Dew Point', color:'#4cc2ff'} ]);
+  charts.temp = mkChart('cTemp', [{label:'Temp', color:'#ff8a5b', area:true, fill:'rgba(255,138,91,.12)'}]);
+  charts.dew  = mkChart('cDew',  [{label:'Dew Point', color:'#4cc2ff', area:true, fill:'rgba(76,194,255,.12)'}]);
   charts.hum  = mkChart('cHum',  [{label:'Humidity %', color:'#7ee787', area:true, fill:'rgba(126,231,135,.12)'}], {y:{min:0,max:100}});
   charts.wind = mkChart('cWind', [{label:'Wind', color:'#a5a5ff'}, {label:'Gust', color:'#ff5252'}], {y:{min:0}});
   charts.rain = mkChart('cRain', [{label:'Rain', color:'#4cc2ff', area:true, fill:'rgba(76,194,255,.18)'}], {y:{min:0}});
@@ -246,7 +247,8 @@ async function refresh() {
   const labels = H.map(r => { const dt = new Date(wall - (now - r[0])*1000);
     return dt.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); });
   const col = i => H.map(r => r[i]);
-  setData(charts.temp, labels, [col(1), col(2)]);                  // temp & dew: percentile
+  setData(charts.temp, labels, [col(1)]);                          // temperature: percentile
+  setData(charts.dew,  labels, [col(2)]);                          // dew point: its own scale
   setData(charts.hum,  labels, [col(3)], {floor:0, ceil:100});     // humidity: 0..100 cap
   setData(charts.wind, labels, [col(4), col(5)], {floor:0});       // wind & gust: never below 0
   setData(charts.rain, labels, [col(6)], {lo:0, hi:1, floor:0});   // rain: full range from 0
