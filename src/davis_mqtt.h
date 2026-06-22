@@ -23,6 +23,10 @@ void mqttLoop();
 // you like; it only actually sends if connected.
 void mqttPublish(const DavisData *data, float rssi, bool radioLocked);
 
+// Keeps WiFi alive if it drops: forces a reconnect, and as a last resort does a
+// clean reboot after a long outage. Call often from loop().
+void wifiWatchdog();
+
 // Status getters used by the display.
 bool wifiIsConnected();
 bool mqttIsConnected();

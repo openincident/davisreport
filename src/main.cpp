@@ -102,7 +102,9 @@ void setup() {
 // ---------------------------------------------------------------------------
 void loop() {
   // 1. Keep the WiFi + MQTT connection healthy (reconnects if it dropped), and
-  //    answer any web-dashboard requests.
+  //    answer any web-dashboard requests. The watchdog forces WiFi back if the
+  //    core's auto-reconnect gives up.
+  wifiWatchdog();
   mqttLoop();
   webLoop();
 

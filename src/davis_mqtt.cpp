@@ -26,7 +26,15 @@
 #include <ArduinoJson.h>
 #include "davis_mqtt.h"
 #include "davis_alarm.h"
+#include "davis_web.h"   // for webPersistNow() before a watchdog reboot
 #include "config.h"
+
+#ifndef WIFI_RECONNECT_SECONDS
+#define WIFI_RECONNECT_SECONDS 30
+#endif
+#ifndef WIFI_REBOOT_SECONDS
+#define WIFI_REBOOT_SECONDS 600
+#endif
 
 // The network plumbing: a basic network connection wrapped by an MQTT client.
 static WiFiClient   wifiClient;
@@ -186,6 +194,8 @@ void mqttBegin() {
 
   // Start joining WiFi (this happens in the background; we check on it later).
   WiFi.mode(WIFI_STA);
+  WiFi.persistent(false);        // don't rewrite WiFi creds to flash on every begin()
+  WiFi.setAutoReconnect(true);   // let the core auto-reconnect; our watchdog backs it up
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.print(F("[wifi] connecting to "));
   Serial.println(WIFI_SSID);
@@ -277,4 +287,48 @@ void mqttPublish(const DavisData *data, float rssi, bool radioLocked) {
 // Simple status getters used by the display.
 // ---------------------------------------------------------------------------
 bool wifiIsConnected() { return WiFi.status() == WL_CONNECTED; }
+
+// ---------------------------------------------------------------------------
+// wifiWatchdog(): keep WiFi alive even if the core's auto-reconnect gives up.
+// Call often from loop(). Everything local (reception, display, logging) keeps
+// running regardless — this only nudges the network back.
+// ---------------------------------------------------------------------------
+void wifiWatchdog() {
+  static uint32_t lastOkMs = 0;     // last time we were connected (also "down since")
+  static uint32_t lastForceMs = 0;  // last forced reconnect attempt
+  static bool     everConnected = false;
+  uint32_t now = millis();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    lastOkMs = now;
+    everConnected = true;
+    return;
+  }
+
+  // Not connected. Start the clock on first observation.
+  if (lastOkMs == 0) lastOkMs = now;
+  uint32_t downMs = now - lastOkMs;
+
+  // After WIFI_RECONNECT_SECONDS of downtime, force a fresh connection attempt
+  // (the core's auto-reconnect sometimes wedges, e.g. after the AP reboots).
+  if (downMs >= (uint32_t)WIFI_RECONNECT_SECONDS * 1000UL &&
+      (now - lastForceMs) >= (uint32_t)WIFI_RECONNECT_SECONDS * 1000UL) {
+    lastForceMs = now;
+    Serial.println(F("[wifi] still down — forcing reconnect"));
+    WiFi.disconnect();
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  }
+
+  // Last resort: if a previously-good connection has been down a long time, do a
+  // clean reboot to recover. (Only if we'd connected before, so a misconfigured
+  // SSID/password doesn't cause an endless reboot loop.) Save history first.
+  if (everConnected && WIFI_REBOOT_SECONDS > 0 &&
+      downMs >= (uint32_t)WIFI_REBOOT_SECONDS * 1000UL) {
+    Serial.println(F("[wifi] down too long — rebooting to recover"));
+    webPersistNow();
+    Serial.flush();
+    delay(50);
+    ESP.restart();
+  }
+}
 bool mqttIsConnected() { return mqtt.connected(); }

@@ -31,4 +31,8 @@ void webLoop();
 void webSample(const DavisData *data, float rssi, bool locked,
                bool alert, const char *alertReason);
 
+// Immediately save the live history ring to flash. Call this before an
+// intentional reboot so the most recent points aren't lost.
+void webPersistNow();
+
 #endif // DAVIS_WEB_H

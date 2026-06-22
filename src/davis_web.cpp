@@ -780,3 +780,8 @@ void webSample(const DavisData *data, float rssi, bool locked,
     saveLive();
   }
 }
+
+// Save the live ring right now (used before an intentional reboot).
+void webPersistNow() {
+  if (ringCount > 0) saveLive();
+}

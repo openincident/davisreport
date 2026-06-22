@@ -35,6 +35,14 @@
 #define MQTT_USER      "mqtt_username"       // the MQTT login you created in Home Assistant
 #define MQTT_PASSWORD  "mqtt_password"       // the matching MQTT password
 
+// WiFi watchdog. If the connection drops, the board forces a fresh reconnect
+// after WIFI_RECONNECT_SECONDS, and — only if it had been online before — does a
+// clean reboot after WIFI_REBOOT_SECONDS to fully recover (history is saved to
+// flash first, so nothing is lost). Set WIFI_REBOOT_SECONDS to 0 to never
+// auto-reboot. Local reception/display/logging keep running the whole time.
+#define WIFI_RECONNECT_SECONDS  30
+#define WIFI_REBOOT_SECONDS     600
+
 // A short name for THIS device on the network. It shows up in Home Assistant
 // and is used to build the topic names. Stick to letters, numbers, and
 // underscores (no spaces).
