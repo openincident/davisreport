@@ -113,8 +113,23 @@ void loop() {
   //    radioPoll() only returns true for REAL, checksum-verified packets — it
   //    silently discards noise on its own — so anything we get here is good.
   if (radioPoll(packet)) {
+    uint32_t rainBefore = weather.rainClicksTotal;
     davisDecode(packet, &weather);     // pull the weather values out of it
     weather.goodPacketCount++;
+
+    // RAIN DIAGNOSTIC (temporary): log every rain-counter message so we can see
+    // what's behind any phantom rain. For each rain (type 0xE) packet we print
+    // the transmitter ID, the raw 0-127 bucket-tip counter, the signal strength,
+    // and the running total — and flag when a tip actually got counted. If we
+    // see the counter blip to an odd value (at low RSSI) and the total jump,
+    // that's a corrupted packet slipping past the checksum, not real rain.
+    if (((packet[0] & 0xF0) >> 4) == 0x0E) {
+      Serial.printf("[rain] id=%u raw=%u rssi=%ddBm total=%.2fin%s\n",
+                    packet[0] & 0x07, packet[3] & 0x7F, (int)radioGetRssi(),
+                    weather.rainClicksTotal * 0.01f,
+                    (weather.rainClicksTotal != rainBefore) ? "  <-- TIP COUNTED" : "");
+    }
+
     mqttPublish(&weather, radioGetRssi(), radioIsLocked());  // send to Home Assistant
     ledPulseUntilMs = millis() + LED_PULSE_MS;   // brief LED "heartbeat" blink
   }
