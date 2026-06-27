@@ -24,6 +24,7 @@
 #include "davis_mqtt.h"
 #include "davis_alarm.h"
 #include "davis_web.h"
+#include "davis_ota.h"
 
 // Our single, shared record of the latest weather readings. Every part of the
 // program reads from or writes to this one structure.
@@ -94,6 +95,9 @@ void setup() {
   // Get the onboard web dashboard ready (it starts serving once WiFi connects).
   webBegin();
 
+  // Get over-the-air updates ready (the listener starts once WiFi connects).
+  otaBegin();
+
   Serial.println(F("Startup complete. Listening for the Davis station..."));
 }
 
@@ -107,6 +111,7 @@ void loop() {
   wifiWatchdog();
   mqttLoop();
   webLoop();
+  otaLoop();      // after webLoop so mDNS is already up; services any OTA update
 
   // 2. Ask the radio whether a new weather message has arrived. This also keeps
   //    the frequency-hopping in sync, so we call it as often as possible.

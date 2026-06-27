@@ -225,6 +225,21 @@
 #define NTP_TZ      "MST7"
 
 // ---------------------------------------------------------------------------
+// 8b. Over-the-air (OTA) firmware updates
+// ---------------------------------------------------------------------------
+// Lets you upload new firmware over WiFi instead of a USB cable (handy once the
+// board is mounted, and more reliable than this board's flaky USB link).
+//   - To push an update from your computer: pio run -e lilygo-t3-ota -t upload
+//   - It is PASSWORD PROTECTED. Change OTA_PASSWORD below to your own secret,
+//     then give the SAME value to the uploader via an environment variable:
+//         export DAVIS_OTA_PASS='your-secret'
+//     (platformio.ini reads that variable, so the password never lands in a
+//     public repo.)
+// Set OTA_ENABLE to 0 to turn the update listener off entirely.
+#define OTA_ENABLE    1
+#define OTA_PASSWORD  "change-me"   // <-- set your own secret
+
+// ---------------------------------------------------------------------------
 // 9. Optional tuning knobs (safe to leave at defaults)
 // ---------------------------------------------------------------------------
 // How often (in seconds) to re-send EVERY reading to Home Assistant even if the
