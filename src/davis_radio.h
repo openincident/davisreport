@@ -46,6 +46,11 @@ bool radioIsLocked();
 // not the station — see docs/05-troubleshooting.md.
 uint32_t radioBadCount();
 
+// Returns how many VALID packets we ignored because they came from a DIFFERENT
+// Davis station (different transmitter ID). A climbing count means there's
+// another Davis transmitter in range — exactly what we filter out.
+uint32_t radioOtherCount();
+
 // Returns the strongest live signal strength (dBm) seen since the last call,
 // then resets. Diagnostic: if this ever spikes well above the noise floor
 // (~ -110 dBm), a real signal is reaching the antenna even if we can't decode

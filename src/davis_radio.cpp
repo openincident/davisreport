@@ -149,6 +149,7 @@ static uint8_t  consecutiveMisses = 0;   // how many we've missed in a row
 static float    lastRssi = -999.0f;      // signal strength of the last thing we received
 static uint32_t badPacketCount = 0;      // receptions that FAILED the Davis checksum (usually noise)
 static float    rssiPeak = -999.0f;      // strongest live signal seen since the last status print
+static uint32_t otherStationCount = 0;   // valid packets ignored because they're a DIFFERENT station
 
 // ---------------------------------------------------------------------------
 // Small helper: tune the radio to a given position in the hop pattern and
@@ -304,7 +305,19 @@ bool radioPoll(uint8_t *packetOut) {
       return false;
     }
 
-    // ----- A REAL, checksum-valid Davis packet! -----
+    // ----- Is it OUR station? -----
+    // The lowest 3 bits of byte 0 are the transmitter ID. The Davis console only
+    // listens to its own ISS, and so do we: another Davis station nearby also
+    // passes the checksum, and letting its independent rain counter mix with ours
+    // invents phantom rain. So we accept only our configured station (STATION_ID)
+    // and ignore the rest — without resyncing to their timing or hopping with them.
+    if ((packetOut[0] & 0x07) != (STATION_ID & 0x07)) {
+      otherStationCount++;
+      radio.startReceive();
+      return false;
+    }
+
+    // ----- A REAL, checksum-valid packet from OUR station! -----
     if (state == STATE_ACQUIRING) {
       // We were parked on channel 0 waiting; a valid packet here means the
       // station is at the very start of its hop pattern, so now we know exactly
@@ -358,6 +371,7 @@ bool radioPoll(uint8_t *packetOut) {
 float    radioGetRssi()  { return lastRssi; }
 bool     radioIsLocked() { return state == STATE_TRACKING; }
 uint32_t radioBadCount() { return badPacketCount; }
+uint32_t radioOtherCount() { return otherStationCount; }
 
 // Returns the strongest live signal seen since the last call, then resets the
 // peak. (So each status line shows the peak during that 5-second window.)

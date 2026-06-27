@@ -183,12 +183,15 @@ void davisDecode(const uint8_t *packet, DavisData *data) {
         // distance around the 0..127 circle, which handles the wrap from 127
         // back to 0 cleanly (e.g. 125 -> 2 counts as 5 new tips).
         uint8_t forward = (currentCounter - previousCounter) & 0x7F;
-        // IMPORTANT: only count SMALL forward steps. Real rain adds at most a
-        // few tips between messages. If the counter appears to jump way forward
-        // (>= 64), that's actually the counter glitching slightly BACKWARD
-        // (a backward step of 1 looks like a forward step of 127). We ignore
-        // those, otherwise a tiny glitch would fake ~1.27 inches of rain.
-        if (forward < 64) {
+        // Only credit PLAUSIBLE small forward steps. Two things to reject:
+        //   - A jump of 64 or more is really a small BACKWARD step (counter
+        //     jitter — a backward step of 1 looks like a forward step of 127).
+        //   - A jump bigger than RAIN_MAX_TIPS is implausible for real rain in
+        //     one ~25 s interval (that'd be a torrential 20+ tips), so it's a
+        //     corrupted reading that slipped past the checksum — not rain.
+        // Either way we ignore it rather than inventing rain.
+        const uint8_t RAIN_MAX_TIPS = 20;   // 0.20" between messages = already extreme
+        if (forward >= 1 && forward <= RAIN_MAX_TIPS) {
           data->rainClicksTotal += forward;
         }
       }
