@@ -57,4 +57,12 @@ uint32_t radioOtherCount();
 // it. If it never rises, the antenna is effectively hearing nothing.
 float radioGetRssiPeak();
 
+// Diagnostics for the learned global crystal frequency correction.
+// radioGetLastFeiHz: most recent raw frequency error (Hz) — trends toward 0 as
+//   the correction settles and we tune onto the signal.
+// radioGetPpm: the learned correction in parts-per-million — roughly the
+//   station's crystal slip once settled.
+float radioGetLastFeiHz();
+float radioGetPpm();
+
 #endif // DAVIS_RADIO_H

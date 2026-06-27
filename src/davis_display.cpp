@@ -187,8 +187,10 @@ void displayShow(const DavisData *data, bool radioOk, float rssi,
   oled.drawStr(0, 47, line);
 
   // --- Bottom status row: radio health and packet counts ---
+  // (The "RX ...dBm" form means we're locked; "searching..." means we're not —
+  // so we don't need a separate "LOCK" word, which ran off the right edge.)
   if (radioOk) {
-    snprintf(line, sizeof(line), "RX %ddBm  ok:%lu  LOCK",
+    snprintf(line, sizeof(line), "RX %ddBm  ok:%lu",
              (int)rssi, (unsigned long)data->goodPacketCount);
   } else {
     snprintf(line, sizeof(line), "searching...  ok:%lu",

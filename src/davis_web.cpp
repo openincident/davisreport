@@ -549,14 +549,19 @@ static void handleData() {
     (unsigned long)(millis() / 1000UL), tUnit, wUnit, rUnit);
   server.sendContent(buf);
 
-  // Current conditions.
+  // Current conditions. The trailing good/bad/fei/ppm fields are radio-health
+  // diagnostics (also handy for capturing reception stats over WiFi, since the
+  // USB serial link drops on long runs).
   snprintf(buf, sizeof(buf),
     "\"current\":{\"temp\":%.1f,\"dew\":%.1f,\"hum\":%u,\"wind\":%u,\"gust\":%u,"
-    "\"dir\":%u,\"rain\":%.2f,\"rssi\":%d,\"locked\":%u,\"alert\":%u,\"alert_reason\":\"%s\"},",
+    "\"dir\":%u,\"rain\":%.2f,\"rssi\":%d,\"locked\":%u,\"alert\":%u,\"alert_reason\":\"%s\","
+    "\"good\":%lu,\"bad\":%lu,\"fei\":%d,\"ppm\":%.2f},",
     outTemp(cur.temp10 / 10.0f), outTemp(cur.dew10 / 10.0f), cur.hum,
     (unsigned)outWind(cur.wind), (unsigned)outWind(cur.gust),
     curDir, outRain(cur.rain100 / 100.0f), cur.rssi,
-    curLocked ? 1 : 0, curAlert ? 1 : 0, curReason);
+    curLocked ? 1 : 0, curAlert ? 1 : 0, curReason,
+    (unsigned long)curGood, (unsigned long)radioBadCount(),
+    (int)radioGetLastFeiHz(), radioGetPpm());
   server.sendContent(buf);
 
   // History: an array of [t, temp, dew, hum, wind, gust, rain] rows, oldest

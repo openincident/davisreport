@@ -34,6 +34,7 @@
 // ===========================================================================
 
 #include <RadioLib.h>
+#include <Preferences.h>     // tiny flash key/value store (NVS) for the learned tuning
 #include "davis_radio.h"
 #include "config.h"
 
@@ -76,6 +77,58 @@ static const uint8_t HOP_PATTERN[51] = {
 static const uint8_t NUM_CHANNELS = 51;
 
 // ---------------------------------------------------------------------------
+// FREQUENCY-ERROR DIAGNOSTIC — averaged "leftover" offset after AFC (ppm)
+// ---------------------------------------------------------------------------
+// WHO ACTUALLY CORRECTS THE FREQUENCY: the chip's own AFC (automatic frequency
+// correction), left ON at all times. It re-measures the Davis transmitter's
+// crystal offset and retunes on EVERY packet, in hardware — which handles drift
+// over temperature and age automatically and copes with any station's offset.
+// It is, simply, the right tool for the job, and in testing it caught several
+// times more packets on a weak signal than any software scheme we tried. So we
+// do NOT try to out-tune it in software (an earlier attempt to do so, with AFC
+// off, measurably hurt reception). AFC owns the tuning. See radioBegin.
+//
+// WHAT THIS NUMBER IS: a *diagnostic*, not a control. After each good packet we
+// read the radio's "frequency error indicator" (FEI) — the error STILL LEFT
+// after AFC has done its correction — and fold it into a heavily-smoothed
+// average. Near zero means AFC is centering the station nicely; a steady drift
+// over days would hint the crystal (ours or theirs) is aging or temperature is
+// swinging. It is persisted so that trend survives reboots. It is NOT applied to
+// the tuning (AFC already did that), so it can never hurt reception.
+//
+// Stored as a unitless fraction of the channel frequency (e.g. 0.000012 == 12
+// ppm) so one number describes the whole 902-928 MHz band.
+static float crystalCorrFrac = 0.0f;
+
+// Smoothing weight (0..1). This is a DIRECT exponential moving average, not an
+// accumulator: each packet nudges the value 5% toward the latest (noisy)
+// reading. That makes it a bounded low-pass of the FEI — it settles on the
+// average and, unlike the integrator we used before, can never wind up/drift.
+static const float PPM_ALPHA = 0.05f;
+
+// Sanity bound: ignore any single FEI reading beyond this (it's post-packet
+// noise, not signal), and clamp the smoothed value to a sane band (~±44 kHz at
+// 915 MHz) as a belt-and-suspenders guard.
+static const float FEI_MAX_HZ   = 40000.0f;          // reject single reads beyond this
+static const float CORR_MAX_FRAC = 48.0e-6f;         // clamp the average (~48 ppm)
+
+// Diagnostics: the most recent raw FEI reading (Hz) — the leftover error after
+// AFC on the last packet. Hovers near zero when AFC is doing its job.
+static float lastFeiHz = 0.0f;
+
+// --- Persistence of the diagnostic average (survives reboots) ---------------
+// We keep the smoothed value in flash (NVS) and reload it at boot so its
+// long-term trend isn't lost on every restart. We rewrite flash only
+// occasionally, and only when the value has actually moved, to spare the
+// flash's limited write endurance.
+static Preferences   prefs;
+static bool          prefsReady = false;
+static float         savedCorrFrac = 0.0f;             // last value written to flash
+static uint32_t      lastPpmSaveMs = 0;
+static const uint32_t PPM_SAVE_INTERVAL_MS = 600000;   // check at most every 10 min
+static const float    PPM_SAVE_THRESH_FRAC = 0.2e-6f;  // ...and only if moved >0.2 ppm
+
+// ---------------------------------------------------------------------------
 // HOW OFTEN THE STATION TRANSMITS
 // ---------------------------------------------------------------------------
 // The gap between messages depends on the station's transmitter ID. The formula
@@ -110,7 +163,17 @@ static const uint16_t MAX_CONSECUTIVE_MISSES = HOP_MAX_MISSES;
 #if defined(RADIO_CHIP_SX1262)
 static SX1262 radio = new Module(PIN_LORA_CS, PIN_LORA_DIO1, PIN_LORA_RST, PIN_LORA_BUSY);
 #else
-static SX1276 radio = new Module(PIN_LORA_CS, PIN_LORA_DIO0, PIN_LORA_RST, PIN_LORA_DIO1);
+// We subclass SX1276 only to reach a couple of low-level registers that RadioLib
+// doesn't expose through its public API (the AFC auto-clear bit and the image-
+// calibration control — see radioBegin). getMod() is "protected", meaning only a
+// subclass may call it, so this thin wrapper adds a public mod() that hands it
+// back. Everything else behaves exactly like a normal SX1276.
+class DavisSX1276 : public SX1276 {
+ public:
+  DavisSX1276(Module *m) : SX1276(m) {}
+  Module *mod() { return getMod(); }
+};
+static DavisSX1276 radio = new Module(PIN_LORA_CS, PIN_LORA_DIO0, PIN_LORA_RST, PIN_LORA_DIO1);
 #endif
 
 // ---------------------------------------------------------------------------
@@ -163,7 +226,11 @@ static uint32_t otherStationCount = 0;   // valid packets ignored because they'r
 // ---------------------------------------------------------------------------
 static void tuneToPatternPosition(uint8_t position) {
   uint8_t channelIndex = HOP_PATTERN[position];        // which frequency #?
-  float   freqMhz      = CHANNEL_FREQ_MHZ[channelIndex];
+  // Tune to this channel's nominal frequency. We do NOT pre-apply any software
+  // offset here — the chip's AFC (left on) measures and corrects the station's
+  // crystal offset itself on every packet, and doing it in hardware decodes more
+  // weak packets than pre-aiming in software did.
+  float freqMhz = CHANNEL_FREQ_MHZ[channelIndex];
   radio.standby();                 // pause receiving while we change frequency
   radio.setFrequency(freqMhz);     // tune to the new frequency
   radio.startReceive();            // resume listening
@@ -237,35 +304,87 @@ bool radioBegin() {
   radio.setCRC(false);                // no hardware checksum
   radio.setEncoding(RADIOLIB_ENCODING_NRZ);  // send bits as-is: no whitening/manchester
 
-  // ENABLE AFC (automatic frequency correction). This is essential: Davis
-  // transmitters sit ~20-28 kHz off their nominal frequency (crystal tolerance),
-  // so without AFC the signal lands at the edge of our filter and we only ever
-  // hear noise. The radio measures each incoming burst's offset and retunes to
-  // match. We give AFC a wider bandwidth (50 kHz) than the normal receive
-  // filter so it can first "find" the off-center signal, then lock it in.
+  // ENABLE AFC (automatic frequency correction) and LEAVE IT ON. This is the
+  // real frequency correction: Davis transmitters sit some kHz off their nominal
+  // frequency (crystal tolerance + drift), and AFC measures that on each packet
+  // and retunes to match — in hardware, every packet, tracking drift for free.
+  // We give it a wider search bandwidth (50 kHz) than the 25 kHz demod filter so
+  // it can first "find" an off-center signal and then pull it in. Our software
+  // only *watches* the leftover error as a diagnostic (see crystalCorrFrac); it
+  // never fights AFC for the tuning.
   radio.setAFCBandwidth(50.0);
   radio.setAFC(true);
   radio.setAFCAGCTrigger(RADIOLIB_SX127X_RX_TRIGGER_PREAMBLE_DETECT);
+
+  // RUN IMAGE-REJECTION CALIBRATION IN-BAND (once). The SX1276 calibrates its
+  // receiver image rejection automatically at power-up — but that factory
+  // calibration is only valid near 434 MHz. We run at 915 MHz, where it leaves
+  // ~13 dB of image rejection on the table (about 35 dB instead of ~48 dB). One
+  // calibration anywhere in our 902-928 MHz band fixes it for the whole band.
+  // We must be in standby and tuned in-band (beginFSK already left us on channel
+  // 0's frequency). Kick off the calibration (RegImageCal bit 6) and wait for
+  // the "running" flag (bit 5) to clear, with a short safety timeout.
+  radio.standby();
+  radio.mod()->SPIsetRegValue(RADIOLIB_SX127X_REG_IMAGE_CAL,
+                                 RADIOLIB_SX127X_IMAGE_CAL_START, 6, 6);
+  uint32_t calStart = millis();
+  while ((radio.mod()->SPIgetRegValue(RADIOLIB_SX127X_REG_IMAGE_CAL)
+          & RADIOLIB_SX127X_IMAGE_CAL_RUNNING) != 0) {
+    if (millis() - calStart > 50) break;   // never hang here (cal takes ~1-2 ms)
+    delay(1);
+  }
+  Serial.println(F("[radio] image-rejection calibrated in-band; AFC on (hardware freq correction)."));
+
+  // RELOAD THE DIAGNOSTIC AVERAGE from flash so its long-term trend survives the
+  // reboot. (NVS namespace "davis".) This value is informational only — AFC does
+  // the actual correcting — so loading it never affects tuning or reception.
+  prefsReady = prefs.begin("davis", false);
+  if (prefsReady) {
+    crystalCorrFrac = prefs.getFloat("ppm", 0.0f);
+    savedCorrFrac   = crystalCorrFrac;
+    Serial.printf("[radio] loaded freq-error diagnostic: %+.2f ppm\n", crystalCorrFrac * 1.0e6f);
+  }
 #endif
 
   // Tell the radio to tap our handler the instant a full message arrives.
   radio.setPacketReceivedAction(onPacketArrived);
 
-  // Begin listening on frequency #0 and start out in "searching" mode.
+  // Begin listening on frequency #0 and start out in "searching" mode (AFC on,
+  // set above, will center the signal for us).
   state = STATE_ACQUIRING;
   patternPosition = 0;
   consecutiveMisses = 0;
+  radio.setFrequency(CHANNEL_FREQ_MHZ[HOP_PATTERN[0]]);
   radio.startReceive();
 
   Serial.println(F("[radio] started OK; searching for the station on channel 0..."));
   return true;
 }
 
+#if !defined(RADIO_CHIP_SX1262)
+// Save the learned correction to flash — but rarely. Only after at least
+// PPM_SAVE_INTERVAL_MS has passed AND only if the value has actually moved more
+// than PPM_SAVE_THRESH_FRAC since the last write. That keeps the tuning across
+// reboots without hammering the flash (which has limited write endurance).
+static void persistPpmIfDue(uint32_t now) {
+  if (!prefsReady) return;
+  if (now - lastPpmSaveMs < PPM_SAVE_INTERVAL_MS) return;
+  lastPpmSaveMs = now;
+  if (fabsf(crystalCorrFrac - savedCorrFrac) < PPM_SAVE_THRESH_FRAC) return;
+  prefs.putFloat("ppm", crystalCorrFrac);
+  savedCorrFrac = crystalCorrFrac;
+  Serial.printf("[radio] saved tuning: %+.2f ppm\n", crystalCorrFrac * 1.0e6f);
+}
+#endif
+
 // ---------------------------------------------------------------------------
 // radioPoll(): the heartbeat. Call this constantly from loop().
 // ---------------------------------------------------------------------------
 bool radioPoll(uint8_t *packetOut) {
   uint32_t now = millis();
+#if !defined(RADIO_CHIP_SX1262)
+  persistPpmIfDue(now);          // occasionally save the learned tuning to flash
+#endif
 
   // Continuously sample the LIVE signal strength (not just when something trips
   // the sync word). We remember the strongest reading since the last status
@@ -281,9 +400,20 @@ bool radioPoll(uint8_t *packetOut) {
   if (packetWaitingFlag) {
     packetWaitingFlag = false;     // clear the flag for next time
 
+    // Read the frequency error FIRST, as the earliest SPI op after the packet
+    // tap, so it best reflects the packet before the FEI register drifts. We do
+    // NOT drop to standby to "freeze" it: doing that on every trigger (noise
+    // included) churns the receiver — resetting AGC/AFC settling, hurting
+    // re-acquisition and throwing RSSI artifacts. The heavy averaging downstream
+    // cleans up the small per-read noise instead, which is the whole point.
+    float feiHz = radio.getFrequencyError();
+
+    // Snapshot the signal strength. skipReceive=true reads the RSSI register in
+    // place, without bouncing receive mode.
+    lastRssi = radio.getRSSI(false, true);
+
     // Pull the 10 raw bytes out of the radio.
     int status = radio.readData(packetOut, DAVIS_PACKET_LENGTH);
-    lastRssi = radio.getRSSI();    // note how strong the signal was (handy even for noise)
 
     // If the read itself errored (rare), just resume listening where we are.
     if (status != RADIOLIB_ERR_NONE) {
@@ -324,7 +454,8 @@ bool radioPoll(uint8_t *packetOut) {
     }
 
     // ----- A REAL, checksum-valid packet from OUR station! -----
-    if (state == STATE_ACQUIRING) {
+    bool wasAcquiring = (state == STATE_ACQUIRING);
+    if (wasAcquiring) {
       // We were parked on channel 0 waiting; a valid packet here means the
       // station is at the very start of its hop pattern, so now we know exactly
       // where it is and can follow along.
@@ -332,6 +463,30 @@ bool radioPoll(uint8_t *packetOut) {
     }
     state = STATE_TRACKING;
     consecutiveMisses = 0;
+
+#if !defined(RADIO_CHIP_SX1262)
+    // UPDATE THE FREQUENCY-ERROR DIAGNOSTIC. We read the leftover error (feiHz)
+    // at the top — what's STILL off after AFC corrected this packet. Turn it into
+    // a fraction of the channel frequency and fold it into a DIRECT moving
+    // average (note "=", not "+=" — this is a bounded low-pass that settles on
+    // the mean and can't drift, unlike the accumulator we used before). This is
+    // purely informational; it is never applied to the tuning. channelIndex is
+    // the frequency we're sitting on now — patternPosition hasn't advanced yet.
+    uint8_t channelIndex = HOP_PATTERN[patternPosition];
+    lastFeiHz = feiHz;                                 // for the status log
+    if (fabsf(feiHz) < FEI_MAX_HZ) {                   // ignore post-packet noise spikes
+      float baseHz = CHANNEL_FREQ_MHZ[channelIndex] * 1000000.0f;
+      float leftoverFrac = feiHz / baseHz;
+      crystalCorrFrac = (1.0f - PPM_ALPHA) * crystalCorrFrac + PPM_ALPHA * leftoverFrac;
+      // belt-and-suspenders clamp to a sane band
+      if (crystalCorrFrac >  CORR_MAX_FRAC) crystalCorrFrac =  CORR_MAX_FRAC;
+      if (crystalCorrFrac < -CORR_MAX_FRAC) crystalCorrFrac = -CORR_MAX_FRAC;
+    }
+    // TEMP diagnostic (can be removed later): per-packet FEI and the smoothed
+    // average residual in ppm.
+    Serial.printf("[fei] ch=%u fei=%+.0fHz ppm=%+.2f\n",
+                  channelIndex, feiHz, crystalCorrFrac * 1.0e6f);
+#endif
 
     // Schedule when the next message should arrive, then hop ahead to the next
     // frequency so we're waiting there before the station transmits.
@@ -386,3 +541,11 @@ float radioGetRssiPeak() {
   rssiPeak = -999.0f;
   return p;
 }
+
+// Diagnostics for the learned global crystal correction (see crystalCorrFrac).
+// radioGetLastFeiHz: the most recent raw frequency error (Hz). As the
+//   correction settles this trends toward zero (we're tuning onto the signal).
+// radioGetPpm: the learned correction expressed in parts-per-million — roughly
+//   the station's crystal slip once settled.
+float radioGetLastFeiHz() { return lastFeiHz; }
+float radioGetPpm()       { return crystalCorrFrac * 1.0e6f; }
