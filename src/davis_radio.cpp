@@ -37,6 +37,7 @@
 #include <Preferences.h>     // tiny flash key/value store (NVS) for the learned tuning
 #include "davis_radio.h"
 #include "config.h"
+#include "davis_log.h"
 
 // ---------------------------------------------------------------------------
 // THE 51 FREQUENCIES (United States 915 MHz band), in megahertz.
@@ -274,8 +275,8 @@ bool radioBegin() {
   if (status != RADIOLIB_ERR_NONE) {
     // A non-zero status means the radio didn't start. Usually a wiring/pin
     // problem, or the TCXO voltage above. Report the code for troubleshooting.
-    Serial.print(F("[radio] FAILED to start, error code: "));
-    Serial.println(status);
+    Log.print(F("[radio] FAILED to start, error code: "));
+    Log.println(status);
     return false;
   }
 
@@ -333,7 +334,7 @@ bool radioBegin() {
     if (millis() - calStart > 50) break;   // never hang here (cal takes ~1-2 ms)
     delay(1);
   }
-  Serial.println(F("[radio] image-rejection calibrated in-band; AFC on (hardware freq correction)."));
+  Log.println(F("[radio] image-rejection calibrated in-band; AFC on (hardware freq correction)."));
 
   // RELOAD THE DIAGNOSTIC AVERAGE from flash so its long-term trend survives the
   // reboot. (NVS namespace "davis".) This value is informational only — AFC does
@@ -342,7 +343,7 @@ bool radioBegin() {
   if (prefsReady) {
     crystalCorrFrac = prefs.getFloat("ppm", 0.0f);
     savedCorrFrac   = crystalCorrFrac;
-    Serial.printf("[radio] loaded freq-error diagnostic: %+.2f ppm\n", crystalCorrFrac * 1.0e6f);
+    Log.printf("[radio] loaded freq-error diagnostic: %+.2f ppm\n", crystalCorrFrac * 1.0e6f);
   }
 #endif
 
@@ -357,7 +358,7 @@ bool radioBegin() {
   radio.setFrequency(CHANNEL_FREQ_MHZ[HOP_PATTERN[0]]);
   radio.startReceive();
 
-  Serial.println(F("[radio] started OK; searching for the station on channel 0..."));
+  Log.println(F("[radio] started OK; searching for the station on channel 0..."));
   return true;
 }
 
@@ -373,7 +374,7 @@ static void persistPpmIfDue(uint32_t now) {
   if (fabsf(crystalCorrFrac - savedCorrFrac) < PPM_SAVE_THRESH_FRAC) return;
   prefs.putFloat("ppm", crystalCorrFrac);
   savedCorrFrac = crystalCorrFrac;
-  Serial.printf("[radio] saved tuning: %+.2f ppm\n", crystalCorrFrac * 1.0e6f);
+  Log.printf("[radio] saved tuning: %+.2f ppm\n", crystalCorrFrac * 1.0e6f);
 }
 #endif
 
@@ -459,7 +460,7 @@ bool radioPoll(uint8_t *packetOut) {
       // We were parked on channel 0 waiting; a valid packet here means the
       // station is at the very start of its hop pattern, so now we know exactly
       // where it is and can follow along.
-      Serial.println(F("[radio] locked on! Now following the hop pattern."));
+      Log.println(F("[radio] locked on! Now following the hop pattern."));
     }
     state = STATE_TRACKING;
     consecutiveMisses = 0;
@@ -484,7 +485,7 @@ bool radioPoll(uint8_t *packetOut) {
     }
     // TEMP diagnostic (can be removed later): per-packet FEI and the smoothed
     // average residual in ppm.
-    Serial.printf("[fei] ch=%u fei=%+.0fHz ppm=%+.2f\n",
+    Log.printf("[fei] ch=%u fei=%+.0fHz ppm=%+.2f\n",
                   channelIndex, feiHz, crystalCorrFrac * 1.0e6f);
 #endif
 
@@ -505,7 +506,7 @@ bool radioPoll(uint8_t *packetOut) {
 
       if (consecutiveMisses >= MAX_CONSECUTIVE_MISSES) {
         // We've lost the thread. Go back to searching from frequency #0.
-        Serial.println(F("[radio] lost the station; re-searching from channel 0."));
+        Log.println(F("[radio] lost the station; re-searching from channel 0."));
         state = STATE_ACQUIRING;
         patternPosition = 0;
         consecutiveMisses = 0;

@@ -20,6 +20,7 @@
 #include <Wire.h>           // the low-level I2C library (used to probe for the screen)
 #include "davis_display.h"
 #include "config.h"
+#include "davis_log.h"
 
 // If an older config.h doesn't define this, assume the screen is wanted.
 #ifndef ENABLE_OLED
@@ -67,7 +68,7 @@ void displayBegin() {
   // just run headless. (This is the safe escape hatch for boards whose screen
   // stalls the bus at startup.)
   if (!ENABLE_OLED) {
-    Serial.println(F("[display] OLED disabled in config.h; running headless."));
+    Log.println(F("[display] OLED disabled in config.h; running headless."));
     displayPresent = false;
     return;
   }
@@ -90,7 +91,7 @@ void displayBegin() {
   Wire.setTimeOut(50);                 // never wait more than 50 ms on the bus
   Wire.beginTransmission(0x3C);        // 0x3C is the SSD1306 screen's I2C address
   if (Wire.endTransmission() != 0) {   // non-zero = nobody answered
-    Serial.println(F("[display] no OLED found at 0x3C — running without a screen."));
+    Log.println(F("[display] no OLED found at 0x3C — running without a screen."));
     displayPresent = false;
     return;
   }
@@ -106,7 +107,7 @@ void displayBegin() {
   oled.drawStr(0, 12, "Davis Weather");
   oled.drawStr(0, 30, "Starting up...");
   oled.sendBuffer();              // push what we drew to the actual screen
-  Serial.println(F("[display] OLED ready."));
+  Log.println(F("[display] OLED ready."));
 }
 
 // ---------------------------------------------------------------------------

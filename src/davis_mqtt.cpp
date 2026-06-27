@@ -28,6 +28,7 @@
 #include "davis_alarm.h"
 #include "davis_web.h"   // for webPersistNow() before a watchdog reboot
 #include "config.h"
+#include "davis_log.h"
 
 #ifndef WIFI_RECONNECT_SECONDS
 #define WIFI_RECONNECT_SECONDS 30
@@ -159,7 +160,7 @@ static void sendAllDiscovery() {
   sendDiscovery("sensor", "rssi",        "Signal Strength",  "signal_strength", "dBm", "rssi", "measurement", true);
   sendDiscovery("binary_sensor", "battery_low", "Battery Low", "battery", "", "battery_low", "", true);
 
-  Serial.println(F("[mqtt] sent Home Assistant discovery; sensors should appear now."));
+  Log.println(F("[mqtt] sent Home Assistant discovery; sensors should appear now."));
 }
 
 // ---------------------------------------------------------------------------
@@ -171,15 +172,15 @@ static bool mqttConnect() {
   bool ok = mqtt.connect(DEVICE_ID, MQTT_USER, MQTT_PASSWORD,
                          statusTopic, 0 /*qos*/, true /*retained*/, "offline");
   if (ok) {
-    Serial.println(F("[mqtt] connected to broker."));
+    Log.println(F("[mqtt] connected to broker."));
     // Announce we're online (retained, so HA sees it any time).
     mqtt.publish(statusTopic, "online", true);
     // (Re)send the discovery messages on every fresh connection.
     sendAllDiscovery();
     discoverySent = true;
   } else {
-    Serial.print(F("[mqtt] connect failed, will retry. state="));
-    Serial.println(mqtt.state());
+    Log.print(F("[mqtt] connect failed, will retry. state="));
+    Log.println(mqtt.state());
   }
   return ok;
 }
@@ -197,8 +198,8 @@ void mqttBegin() {
   WiFi.persistent(false);        // don't rewrite WiFi creds to flash on every begin()
   WiFi.setAutoReconnect(true);   // let the core auto-reconnect; our watchdog backs it up
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print(F("[wifi] connecting to "));
-  Serial.println(WIFI_SSID);
+  Log.print(F("[wifi] connecting to "));
+  Log.println(WIFI_SSID);
 
   // Point the MQTT client at the broker. The bigger buffer is needed because
   // the discovery messages are larger than PubSubClient's small default.
@@ -314,7 +315,7 @@ void wifiWatchdog() {
   if (downMs >= (uint32_t)WIFI_RECONNECT_SECONDS * 1000UL &&
       (now - lastForceMs) >= (uint32_t)WIFI_RECONNECT_SECONDS * 1000UL) {
     lastForceMs = now;
-    Serial.println(F("[wifi] still down — forcing reconnect"));
+    Log.println(F("[wifi] still down — forcing reconnect"));
     WiFi.disconnect();
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   }
@@ -324,7 +325,7 @@ void wifiWatchdog() {
   // SSID/password doesn't cause an endless reboot loop.) Save history first.
   if (everConnected && WIFI_REBOOT_SECONDS > 0 &&
       downMs >= (uint32_t)WIFI_REBOOT_SECONDS * 1000UL) {
-    Serial.println(F("[wifi] down too long — rebooting to recover"));
+    Log.println(F("[wifi] down too long — rebooting to recover"));
     webPersistNow();
     Serial.flush();
     delay(50);

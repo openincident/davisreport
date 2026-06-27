@@ -25,6 +25,7 @@
 #include "davis_web.h"
 #include "davis_radio.h"   // for radioBadCount() in /metrics
 #include "config.h"
+#include "davis_log.h"
 
 // Sensible fallbacks if an older config.h doesn't define these.
 #ifndef WEB_ENABLE
@@ -110,7 +111,7 @@ static void loadLive() {
   f.close();
   if (ok && cnt <= WEB_HISTORY_POINTS && head < WEB_HISTORY_POINTS) {
     ringCount = cnt; ringHead = head;
-    Serial.printf("[web] restored %u history points from flash\n", ringCount);
+    Log.printf("[web] restored %u history points from flash\n", ringCount);
   }
 }
 
@@ -161,12 +162,12 @@ static void longInit() {
       f.read((uint8_t *)&longCount, 2);
       f.read((uint8_t *)&longHead, 2);
       f.close();
-      Serial.printf("[web] long-term store: %u hourly records\n", longCount);
+      Log.printf("[web] long-term store: %u hourly records\n", longCount);
       return;
     }
     f.close();
   }
-  Serial.println(F("[web] creating long-term store (~82 KB)..."));
+  Log.println(F("[web] creating long-term store (~82 KB)..."));
   File w = LittleFS.open(LONG_FILE, "w");
   if (!w) return;
   uint32_t magic = LONG_MAGIC; uint16_t z = 0;
@@ -353,6 +354,11 @@ static const char PAGE_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
   <div class="chartcard"><h3>Wind avg &amp; gust max</h3><canvas id="cLT_wind" height="100"></canvas></div>
   <div class="chartcard"><h3>Rain per hour</h3><canvas id="cLT_rain" height="100"></canvas></div>
 
+  <h2>Serial log</h2>
+  <div class="chartcard"><h3>Recent messages <small style="font-weight:normal;color:#888">— the board's debug log, newest at the bottom; refreshes with the page</small></h3>
+    <pre id="log" style="height:240px;overflow:auto;margin:0;padding:8px;background:#0d1117;color:#3fb950;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;border-radius:6px">loading…</pre>
+  </div>
+
   <footer id="foot">Served by the LilyGO board · live history resets when the board reboots</footer>
 </div>
 <script>
@@ -449,7 +455,20 @@ function card(label, val, unit) {
 }
 function compass(deg){ const dirs=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
   return dirs[Math.round(deg/22.5)%16]; }
+// Pull the recent serial-log lines and drop them into the scrolling box. We keep
+// the view pinned to the bottom (newest) UNLESS you've scrolled up to read back,
+// so it doesn't yank the page away while you're looking at older lines.
+async function refreshLog() {
+  try {
+    const t = await (await fetch('log')).text();
+    const el = document.getElementById('log');
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+    el.textContent = t || '(no messages yet)';
+    if (atBottom) el.scrollTop = el.scrollHeight;
+  } catch(e) { /* leave the last log shown if a fetch hiccups */ }
+}
 async function refresh() {
+  refreshLog();   // update the serial-log box on the same tick (independent of the data fetch)
   let d;
   try { d = await (await fetch('data.json')).json(); }
   catch(e){ document.getElementById('status').textContent='offline — retrying…'; return; }
@@ -683,13 +702,32 @@ static void handleClear() {
   server.send(200, "text/plain", "All stored history cleared.");
 }
 
+// Serve the recent serial-log lines as plain text (oldest first), for the
+// scrolling "Serial log" box on the dashboard. We stream line by line so we
+// never need a big buffer; the page fetches this on its normal refresh tick.
+static void handleLog() {
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "text/plain; charset=utf-8", "");
+  uint16_t n = logLineCount();
+  for (uint16_t i = 0; i < n; i++) {
+    const char *ln = logLine(i);
+    // IMPORTANT: sendContent("") sends a zero-length chunk, which is the
+    // chunked-encoding "end of response" marker. A blank log line is an empty
+    // string, so sending it directly would END the response right there. We skip
+    // the (empty) text but still send the newline, so blank lines render as blank.
+    if (ln[0] != '\0') server.sendContent(ln);
+    server.sendContent("\n");
+  }
+  server.sendContent("");   // final empty chunk: deliberately ends the response
+}
+
 void webBegin() {
   if (!WEB_ENABLE) return;
   // Mount the flash filesystem (format it the first time) and restore any saved
   // history, so the live charts pick up where they left off after a reboot.
   fsReady = LittleFS.begin(true);
   if (fsReady) { loadLive(); longInit(); }
-  else Serial.println(F("[web] LittleFS mount failed; history won't persist"));
+  else Log.println(F("[web] LittleFS mount failed; history won't persist"));
   // Register the URLs. We actually start listening lazily in webLoop(),
   // once WiFi is connected.
   server.on("/", handleRoot);
@@ -697,6 +735,7 @@ void webBegin() {
   server.on("/longterm.json", handleLongterm);
   server.on("/clear", handleClear);
   server.on("/metrics", handleMetrics);
+  server.on("/log", handleLog);
 }
 
 void webLoop() {
@@ -716,11 +755,11 @@ void webLoop() {
     if (MDNS.begin(WEB_HOSTNAME)) {
       MDNS.addService("http", "tcp", 80);
     }
-    Serial.print(F("[web] dashboard ready at http://"));
-    Serial.print(WiFi.localIP());
-    Serial.print(F("/  and  http://"));
-    Serial.print(WEB_HOSTNAME);
-    Serial.println(F(".local/"));
+    Log.print(F("[web] dashboard ready at http://"));
+    Log.print(WiFi.localIP());
+    Log.print(F("/  and  http://"));
+    Log.print(WEB_HOSTNAME);
+    Log.println(F(".local/"));
     serverStarted = true;
   }
 

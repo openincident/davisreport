@@ -6,6 +6,7 @@
 #include <WiFi.h>
 #include "davis_ota.h"
 #include "config.h"
+#include "davis_log.h"
 
 // Let an older config.h leave OTA on by default, and supply a fallback password
 // so a missing setting can't accidentally publish an UNPROTECTED update port.
@@ -50,24 +51,24 @@ void otaLoop() {
     // Progress/status messages on the serial log, so an update is easy to watch
     // if you do happen to have a cable attached.
     ArduinoOTA.onStart([]() {
-      Serial.println(F("[ota] update incoming — pausing normal work..."));
+      Log.println(F("[ota] update incoming — pausing normal work..."));
     });
     ArduinoOTA.onProgress([](unsigned int done, unsigned int total) {
-      Serial.printf("[ota] %u%%\r", total ? (done * 100u) / total : 0u);
+      Log.printf("[ota] %u%%\r", total ? (done * 100u) / total : 0u);
     });
     ArduinoOTA.onEnd([]() {
-      Serial.println(F("\n[ota] update complete — rebooting into new firmware."));
+      Log.println(F("\n[ota] update complete — rebooting into new firmware."));
     });
     ArduinoOTA.onError([](ota_error_t err) {
-      Serial.printf("[ota] FAILED (error %u) — board keeps running old firmware.\n",
+      Log.printf("[ota] FAILED (error %u) — board keeps running old firmware.\n",
                     (unsigned)err);
     });
 
     ArduinoOTA.begin();
     otaStarted = true;
-    Serial.print(F("[ota] ready — flash over WiFi with: pio run -e lilygo-t3-ota -t upload  (host "));
-    Serial.print(WEB_HOSTNAME);
-    Serial.println(F(".local)"));
+    Log.print(F("[ota] ready — flash over WiFi with: pio run -e lilygo-t3-ota -t upload  (host "));
+    Log.print(WEB_HOSTNAME);
+    Log.println(F(".local)"));
   }
 
   // Service any in-progress update. When an update is actually transferring,

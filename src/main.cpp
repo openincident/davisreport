@@ -18,6 +18,7 @@
 
 #include <Arduino.h>
 #include "config.h"
+#include "davis_log.h"
 #include "davis_protocol.h"
 #include "davis_radio.h"
 #include "davis_display.h"
@@ -52,14 +53,14 @@ void setup() {
   // platformio.ini (monitor_speed). Watch these with: pio device monitor
   Serial.begin(115200);
   delay(200);
-  Serial.println();
-  Serial.println(F("=== davisreport: Davis weather receiver starting ==="));
+  Log.println();
+  Log.println(F("=== davisreport: Davis weather receiver starting ==="));
 
   // These "[setup] ..." markers (each followed by Serial.flush(), which waits
   // for the text to actually be sent) let us see exactly how far startup gets
   // if the board ever hangs or reboots. Whatever marker prints LAST is the step
   // that's failing. They're cheap to leave in.
-  Serial.println(F("[setup] 1/4 init data")); Serial.flush();
+  Log.println(F("[setup] 1/4 init data")); Serial.flush();
 
   // Start with a clean, empty set of readings.
   davisInit(&weather);
@@ -73,15 +74,15 @@ void setup() {
   }
 
   // Turn on the little screen and show a "starting up" message.
-  Serial.println(F("[setup] 2/4 starting display")); Serial.flush();
+  Log.println(F("[setup] 2/4 starting display")); Serial.flush();
   displayBegin();
-  Serial.println(F("[setup] 2/4 display OK")); Serial.flush();
+  Log.println(F("[setup] 2/4 display OK")); Serial.flush();
 
   // Start the radio. If this fails, it's almost always a pin/wiring problem,
   // so we stop here and keep showing the error rather than pretending to work.
-  Serial.println(F("[setup] 3/4 starting radio")); Serial.flush();
+  Log.println(F("[setup] 3/4 starting radio")); Serial.flush();
   if (!radioBegin()) {
-    Serial.println(F("FATAL: radio failed to start. Check the pin numbers in config.h."));
+    Log.println(F("FATAL: radio failed to start. Check the pin numbers in config.h."));
     // Halt in a gentle loop, leaving the failure visible on serial.
     while (true) {
       delay(1000);
@@ -89,7 +90,7 @@ void setup() {
   }
 
   // Start joining WiFi and preparing the MQTT (Home Assistant) connection.
-  Serial.println(F("[setup] 4/4 starting wifi/mqtt")); Serial.flush();
+  Log.println(F("[setup] 4/4 starting wifi/mqtt")); Serial.flush();
   mqttBegin();
 
   // Get the onboard web dashboard ready (it starts serving once WiFi connects).
@@ -98,7 +99,7 @@ void setup() {
   // Get over-the-air updates ready (the listener starts once WiFi connects).
   otaBegin();
 
-  Serial.println(F("Startup complete. Listening for the Davis station..."));
+  Log.println(F("Startup complete. Listening for the Davis station..."));
 }
 
 // ---------------------------------------------------------------------------
@@ -129,7 +130,7 @@ void loop() {
     // see the counter blip to an odd value (at low RSSI) and the total jump,
     // that's a corrupted packet slipping past the checksum, not real rain.
     if (((packet[0] & 0xF0) >> 4) == 0x0E) {
-      Serial.printf("[rain] id=%u raw=%u rssi=%ddBm total=%.2fin%s\n",
+      Log.printf("[rain] id=%u raw=%u rssi=%ddBm total=%.2fin%s\n",
                     packet[0] & 0x07, packet[3] & 0x7F, (int)radioGetRssi(),
                     weather.rainClicksTotal * 0.01f,
                     (weather.rainClicksTotal != rainBefore) ? "  <-- TIP COUNTED" : "");
@@ -179,7 +180,7 @@ void loop() {
   //    whether WiFi/MQTT are connected.
   if (now - lastStatusMs >= 5000) {
     lastStatusMs = now;
-    Serial.printf(
+    Log.printf(
       "[status] lock=%s rssi=%ddBm peak=%ddBm good=%lu bad=%lu other=%lu fei=%+dHz ppm=%+.2f | %.1fF %.0f%%RH dp=%.0fF wind=%.0fmph dir=%u gust=%.0f rain=%.2fin | wifi=%s mqtt=%s alert=%s\n",
       radioIsLocked() ? "YES" : "no",
       (int)radioGetRssi(),
