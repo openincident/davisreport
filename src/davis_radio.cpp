@@ -85,13 +85,19 @@ static uint32_t transmitIntervalMs = 0;
 
 // How long after the expected arrival time we wait before declaring a message
 // "missed." Radios and clocks aren't perfectly precise, so we allow a little
-// slack. (milliseconds)
-static const uint32_t MISS_GUARD_MS = 600;
+// slack. (milliseconds) — tunable via HOP_MISS_GUARD_MS in config.h.
+#ifndef HOP_MISS_GUARD_MS
+#define HOP_MISS_GUARD_MS 1000
+#endif
+static const uint32_t MISS_GUARD_MS = HOP_MISS_GUARD_MS;
 
-// How many messages in a row we'll tolerate missing while still trying to
-// follow the pattern blindly. After this many, we give up and re-acquire from
-// scratch on frequency #0.
-static const uint8_t MAX_CONSECUTIVE_MISSES = 6;
+// How many messages in a row we'll tolerate missing while still "coasting"
+// (following the pattern blindly). After this many, we give up and re-acquire
+// from scratch on frequency #0 — tunable via HOP_MAX_MISSES in config.h.
+#ifndef HOP_MAX_MISSES
+#define HOP_MAX_MISSES 10
+#endif
+static const uint16_t MAX_CONSECUTIVE_MISSES = HOP_MAX_MISSES;
 
 // ---------------------------------------------------------------------------
 // THE RADIO OBJECT (provided by the RadioLib library)
@@ -145,7 +151,7 @@ static RadioState state = STATE_ACQUIRING;
 
 static uint8_t  patternPosition = 0;     // where we think we are in HOP_PATTERN (0..50)
 static uint32_t nextExpectedMs = 0;      // when we expect the next message to arrive
-static uint8_t  consecutiveMisses = 0;   // how many we've missed in a row
+static uint16_t consecutiveMisses = 0;   // how many we've missed in a row
 static float    lastRssi = -999.0f;      // signal strength of the last thing we received
 static uint32_t badPacketCount = 0;      // receptions that FAILED the Davis checksum (usually noise)
 static float    rssiPeak = -999.0f;      // strongest live signal seen since the last status print

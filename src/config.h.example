@@ -55,8 +55,29 @@
 // Every Davis sensor suite is set to a transmitter ID from 1 to 8 (you pick it
 // with the dip switches inside the ISS; the console calls it "Station ID").
 // IMPORTANT: subtract 1 here. If your console shows Station 1, put 0 below.
-// This ID controls the exact timing between transmissions, so it must match.
+// This value does two things: it sets the exact transmit timing AND it tells the
+// receiver which station to follow — packets from any OTHER Davis station nearby
+// are ignored (this is what stops a neighbor's station inventing phantom rain).
 #define STATION_ID     0     // console "Station 1" => 0, "Station 2" => 1, etc.
+
+// ---------------------------------------------------------------------------
+// 3b. Reception tuning — how patiently it holds the lock through weak signal
+// ---------------------------------------------------------------------------
+// Once locked, the receiver predicts when each ~2.5 s packet arrives and hops
+// channels to meet it. When the signal is weak and packets get missed, these
+// decide how long it keeps "coasting" (following the known pattern blind) before
+// giving up and doing a slow re-search (parking on channel 0, up to ~2 minutes).
+//
+// HOP_MAX_MISSES: how many packets in a row it may miss while still coasting.
+//   Each miss is ~2.5 s, so 10 rides out ~25 s of weak signal. CAUTION: very
+//   high values backfire — the receiver just reports "locked" while coasting
+//   blind, and recovers SLOWER than a quick re-search (which re-locks against a
+//   known reference channel). Keep this modest. The real cure for a weak signal
+//   is a better antenna / placement, not this number.
+// HOP_MISS_GUARD_MS: extra grace time past the predicted arrival to still catch
+//   a slightly-late packet before counting it missed. Keep well under ~2500.
+#define HOP_MAX_MISSES      10
+#define HOP_MISS_GUARD_MS   1000
 
 // ---------------------------------------------------------------------------
 // 4. Units — how readings are shown and published
