@@ -236,6 +236,17 @@ void mqttPublish(const DavisData *data, float rssi, bool radioLocked) {
   // Don't bother if we're not connected.
   if (!mqtt.connected()) return;
 
+  // Don't publish anything until the station is actually reporting real weather.
+  // At power-on every field is zero, and each reading type only arrives in its
+  // OWN kind of packet — temperature in one, humidity in another — which can
+  // take a few seconds each to come around (wind is the only value in every
+  // packet). If we published before then, Home Assistant would record a phantom
+  // 0 °F / 0 %RH dip. So we hold off until we've decoded at least one real
+  // temperature AND one real humidity packet. By that point wind is known too,
+  // and the dew-point calculation (which needs both temp and humidity) is valid.
+  // The "*Update" stamps are millis() timestamps that stay 0 until first heard.
+  if (data->lastTempUpdate == 0 || data->lastHumidityUpdate == 0) return;
+
   // Re-send at most a few times per second even if called rapidly, and force a
   // re-send every MQTT_REPUBLISH_SECONDS so sensors never look stale.
   uint32_t now = millis();
