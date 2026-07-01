@@ -20,6 +20,10 @@ src/idf_component.yml
 # holds secrets and must stay on your machine only.
 src/config.h
 
+# Home Assistant long-lived access token used by the dashboard tooling.
+# This is a secret — it must never be committed to the public repo.
+homeassistant/.config
+
 # Editor / IDE noise.
 .vscode/
 .idea/
